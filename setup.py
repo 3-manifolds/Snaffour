@@ -143,9 +143,9 @@ setup(
     version = version,
     description = 'Finds a grevlex Groebner basis using the F4 algorithm.',
     long_description = long_description,
-    url = 'http://t3m.computop.org/Snaffour',
+    url = 'https://bitbucket.org/t3m/snaffour/',
     author = 'Marc Culler and Nathan M. Dunfield and Matthias Goerner',
-    author_email = 'culler@uic.edu, nathan@dunfield.info',
+    author_email = 'culler@uic.edu, nathan@dunfield.info, enischte@gmail.com',
     license='GPLv2+',
     classifiers = [
         'Development Status :: 3 - Alpha',
