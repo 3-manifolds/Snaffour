@@ -1,0 +1,9 @@
+syntax: glob
+__pycache__
+*.egg-info
+*.pyc
+*.so
+*~
+build
+cython_src/*.c
+documentation/doxyhtml
