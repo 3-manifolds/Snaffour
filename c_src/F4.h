@@ -127,6 +127,7 @@ bool Poly_make_row(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, 
 bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank);
 bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank, size_t num_rows);
 bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
+bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);
 
 #define F_FOUR_H
 #endif

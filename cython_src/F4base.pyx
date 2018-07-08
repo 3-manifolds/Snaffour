@@ -2,7 +2,7 @@
 #   This file is part of the program Snaffour.
 #
 #   Copyright (C) 2018 by Marc Culler, Nathan Dunfield, Matthias Görner
-#   and others. 
+#   and others.
 #
 #   This program is free software: you can redistribute it and/or modify
 #   it under the terms of the GNU General Public License as published by
@@ -70,6 +70,7 @@ cdef extern from "F4.h":
     cdef bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
                            size_t num_rows)
     cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
+    cdef bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank)
 
 cdef extern from "Python.h":
     pass
@@ -238,11 +239,18 @@ cdef class Term(object):
         answer.total_degree = Term_total_degree(answer.c_term, self.ring.rank)
         return answer
 
-    def __mul__(Term self, Term other):
-        cdef Term answer = Term(ring=self.ring)
-        Term_multiply(self.c_term, other.c_term, answer.c_term)
-        answer.total_degree = Term_total_degree(answer.c_term, self.ring.rank)
-        return answer
+    def __mul__(self, other):
+        cdef Term left, right, answer
+        if isinstance(self, Term) and isinstance(other, Term) and self.ring == other.ring:
+            left, right = self, other
+            answer = Term(ring=left.ring)
+            Term_multiply(left.c_term, right.c_term, answer.c_term)
+            answer.total_degree = Term_total_degree(answer.c_term, left.ring.rank)
+            return answer
+        elif isinstance(self, int) and isinstance(other, Term):
+            return Monomial(*other.degree, coefficient=self, ring=other.ring)
+        else:
+            return NotImplemented
 
     def __or__(Term self, Term other):
         """
@@ -296,24 +304,44 @@ cdef class Monomial(object):
     """
     cdef public int coefficient
     cdef public term
+    cdef public ring
 
     def __init__(self, *degree, coefficient=1, PolyRing ring=no_ring):
         self.coefficient = coefficient
         self.term = Term(*degree, ring=ring)
+        self.ring = self.term.ring
 
     def __hash__(self):
         return hash(self.coefficient) ^ hash(self.term)
 
+    def __mul__(self, other):
+        if isinstance(self, int) and isinstance(other, Monomial):
+            return Monomial(*other.degree, coefficient=self, ring=other.ring)
+        elif isinstance(self, Term) and isinstance(other, Monomial) and self.ring == other.ring:
+            return Monomial(*((self*other.term).degree),
+                            coefficient=other.coefficient,
+                            ring=self.ring)
+        elif isinstance(self, Monomial) and isinstance(other, Term) and self.ring == other.ring:
+            return Monomial(*((self.term*other).degree),
+                            coefficient=self.coefficient,
+                            ring=other.ring)
+        elif isinstance(self, Monomial) and isinstance(other, Monomial) and self.ring == other.ring:
+            return Monomial(*((self.term*other.term).degree),
+                            coefficient=self.coefficient*other.coefficient,
+                            ring=self.ring)
+        else:
+            return NotImplemented
+
     def __neg__(self):
         return Monomial(*self.term.degree,
-            coefficient=self.term.ring.negate_coeff(self.coefficient))
+            coefficient=self.ring.negate_coeff(self.coefficient))
 
     def __eq__(self, other):
         return (self.coefficient == other.coefficient and
                 self.term == other.term)
 
     def __repr__(self):
-        return ('%s*%s'%(self.term.ring.normalize_coeff(self.coefficient), self.term))
+        return ('%s*%s'%(self.ring.normalize_coeff(self.coefficient), self.term))
 
 cdef class Polynomial(object):
     """
@@ -421,6 +449,36 @@ cdef class Polynomial(object):
         result = Polynomial(ring=self.ring)
         if not Poly_sub(&self.c_poly, &other.c_poly, &result.c_poly,
                         self.ring.BIG_PRIME, self.ring.rank):
+            raise RuntimeError('Out of memory!')
+        result.decorate()
+        return result
+
+    def __mul__(self, Polynomial other):
+        cdef Polynomial result = Polynomial(ring=other.ring)
+        cdef Polynomial temp
+        cdef Term t
+        cdef int a
+        if isinstance(self, int):
+            success = Poly_times_int(&other.c_poly, self, &result.c_poly,
+                                other.ring.BIG_PRIME, other.ring.rank)
+        elif isinstance(self, Term):
+            t = self
+            success = Poly_times_term(&other.c_poly, t.c_term, &result.c_poly,
+                                other.ring.BIG_PRIME, other.ring.rank)
+        elif isinstance(self, Monomial):
+            m = self
+            t = m.term
+            temp = Polynomial(ring=other.ring)
+            success = Poly_times_term(&other.c_poly, t.c_term, &temp.c_poly,
+                                other.ring.BIG_PRIME, other.ring.rank)
+            if not success:
+                raise RuntimeError('Out of memory!')
+            a = m.coefficient
+            success = Poly_times_int(&temp.c_poly, a, &result.c_poly,
+                                other.ring.BIG_PRIME, other.ring.rank)
+        else:
+            return NotImplemented
+        if not success:
             raise RuntimeError('Out of memory!')
         result.decorate()
         return result

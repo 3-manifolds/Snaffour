@@ -369,6 +369,26 @@ bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime
   return true;
 }
 
+/** Multiply a Polynomial by an int.
+ */
+
+bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank) {
+  int N = 0;
+  coeff_t p_coeff;
+  if (! Poly_alloc(answer, P->num_terms, rank)) {
+    return false;
+  }
+  for (N=0; N < P->num_terms; N++) {
+    answer->terms[N] = P->terms[N];
+    p_coeff = P->coefficients[N];
+    p_coeff.value = multiply_mod(prime, a, p_coeff.value);
+    answer->coefficients[N] = p_coeff;
+  }
+  answer->num_terms = N;
+  answer->rank = rank;
+  return true;
+}
+
 /** Copy a Polynomial, while dividing by the head coefficient.
  */
 
