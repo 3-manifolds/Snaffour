@@ -73,11 +73,11 @@ R7.Polynomial({(1,0,0,0,0,0,0): 1, (0,0,0,0,0,0,1): 1, (0,0,0,0,0,1,0): 1, (0,0,
 print('\nComputing some Groebner bases over Fp, p = 2^31 - 1\n')
 
 print("Elizabeth Arnold's example:")
-print(R3.Ideal(A).groebner_basis())
+print(R3.Ideal(A).reduced_groebner_basis())
 print()
 print('Cyclic-4:')
-print(R4.Ideal(C4).groebner_basis())
+print(R4.Ideal(C4).reduced_groebner_basis())
 print()
 print('The size of the Cyclic-5 basis:')
-print(len(R5.Ideal(C5).groebner_basis()))
+print(len(R5.Ideal(C5).reduced_groebner_basis()))
 

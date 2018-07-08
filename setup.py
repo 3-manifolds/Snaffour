@@ -55,6 +55,16 @@ class SnaffourTest(Command):
         sys.path.insert(0, build_lib_dir)
         import snaffour.test
 
+class SnaffourDocs(Command):
+    user_options = []
+    def initialize_options(self):
+        pass 
+    def finalize_options(self):
+        pass
+    def run(self):
+        os.system('cd documentation; doxygen')
+        os.system('cd documentation/sphinx; make clean; make html')
+
 def check_call(args):
     try:
         subprocess.check_call(args)
@@ -62,6 +72,8 @@ def check_call(args):
         executable = args[0]
         command = [a for a in args if not a.startswith('-')][-1]
         raise RuntimeError(command + ' failed for ' + executable)
+
+# The commands below have not been tested!
 
 # For manylinux1 wheels, need to set the platform name manually
 try:
@@ -163,9 +175,7 @@ setup(
     ext_modules = [F4base],
     cmdclass = {'clean':SnaffourClean,
                 'test':SnaffourTest,
-                'release':SnaffourRelease,
-                'bdist_wheel':SnaffourBuildWheel,
-                'pip_install':SnaffourPipInstall,
+                'document':SnaffourDocs,
     },
     zip_safe=False, 
 )

@@ -105,10 +105,10 @@ cdef class PolyRing(object):
         A normalized representative is in the interval [-P//2, P//2).
         This usually looks better when printing coefficients.
         """
-        x = c % self.BIG_PRIME
-        return x if x < self.CENTER else x - self.BIG_PRIME
+        # We assume c is reduced mod BIG_PRIME so it fits in an int
+        return c if c < self.CENTER else c - self.BIG_PRIME
 
-    cpdef reduce_coeff(self, int c):
+    cpdef reduce_coeff(self, c):
         """
         Reduce mod P.
         """
@@ -248,7 +248,8 @@ cdef class Term(object):
             answer.total_degree = Term_total_degree(answer.c_term, left.ring.rank)
             return answer
         elif isinstance(self, int) and isinstance(other, Term):
-            return Monomial(*other.degree, coefficient=self, ring=other.ring)
+            coeff = other.ring.reduce_coeff(self)
+            return Monomial(*other.degree, coefficient=coeff, ring=other.ring)
         else:
             return NotImplemented
 
@@ -307,16 +308,17 @@ cdef class Monomial(object):
     cdef public ring
 
     def __init__(self, *degree, coefficient=1, PolyRing ring=no_ring):
-        self.coefficient = coefficient
         self.term = Term(*degree, ring=ring)
         self.ring = self.term.ring
+        self.coefficient = ring.reduce_coeff(coefficient)
 
     def __hash__(self):
         return hash(self.coefficient) ^ hash(self.term)
 
     def __mul__(self, other):
         if isinstance(self, int) and isinstance(other, Monomial):
-            return Monomial(*other.degree, coefficient=self, ring=other.ring)
+            coeff = other.ring.reduce_coeff(self*other.coefficient)
+            return Monomial(*other.degree, coefficient=coeff, ring=other.ring)
         elif isinstance(self, Term) and isinstance(other, Monomial) and self.ring == other.ring:
             return Monomial(*((self*other.term).degree),
                             coefficient=other.coefficient,
@@ -327,7 +329,7 @@ cdef class Monomial(object):
                             ring=other.ring)
         elif isinstance(self, Monomial) and isinstance(other, Monomial) and self.ring == other.ring:
             return Monomial(*((self.term*other.term).degree),
-                            coefficient=self.coefficient*other.coefficient,
+                            coefficient=self.ring.reduce_coeff(self.coefficient*other.coefficient),
                             ring=self.ring)
         else:
             return NotImplemented
@@ -921,3 +923,56 @@ cdef class Ideal(object):
                          return self.simplify(toveru, p)
         # No simplification was possible.  Just return the input
         return (t, q)
+
+    def normal_form(self, f):
+        return self._normalize(f, self.groebner_basis())
+    
+    def _normalize(self, f, G):
+        """
+        If a term of f is divisible by a head term of g in G, then kill it by
+        subtracting a multiple of g.  Return f when no further simplification is
+        possible.  We assume that the elements of G are monic, since in practice
+        G will usually be part of a Gröbner basis.
+        """
+        progress = True
+        while progress:
+            progress = False
+            # One day we might want to do this in C
+            for m in f.monomials:
+                for g in G:
+                    if g.head_term.divides(m.term):
+                        f = f - m.coefficient*(m.term // g.head_term)*g
+                        progress = True
+                        break
+        return f
+
+    def reduced_groebner_basis(self):
+        """
+        Return the canonical reduced Gröbner basis of this ideal.
+        >>> R3 = PolyRing('x', 'y', 'z')
+        >>> A = [
+        ... R3.Polynomial({(2,2,0):8, (1,3,0):5, (3,0,1):3, (2,1,1):1}),
+        ... R3.Polynomial({(5,0,0):1, (0,3,2):2, (0,2,3):13, (0,1,4):5}),
+        ... R3.Polynomial({(3,0,0):8, (0,3,0):12, (1,0,2):2, (0,0,0):3}),
+        ... R3.Polynomial({(2,4,0):7, (1,3,2):18, (0,3,3):1})
+        ... ]
+        >>> A
+        [8*x^2*y^2 + 5*x*y^3 + 3*x^3*z + x^2*y*z, x^5 + 2*y^3*z^2 + 13*y^2*z^3 + 5*y*z^4, 8*x^3 + 12*y^3 + 2*x*z^2 + 3, 7*x^2*y^4 + 18*x*y^3*z^2 + y^3*z^3]
+        >>> I = R3.Ideal(A)
+        >>> I.reduced_groebner_basis()
+        [y^3 + 536870912, z^2, x]
+        >>> R3.reduce_coeff(4*536870912)
+        1
+        """
+        if self._reduced_groebner_basis is not None:
+            return self._reduced_groebner_basis
+        G = self.groebner_basis()
+        result = []
+        for n, g in enumerate(G):
+            h = self._normalize(g, G[:n] + G[n+1:])
+            if h.is_nonzero:
+                result.append(h)
+        result.sort(key=lambda f: f.head_term, reverse=True)
+        self._reduced_groebner_basis = result
+        return result               
+        
