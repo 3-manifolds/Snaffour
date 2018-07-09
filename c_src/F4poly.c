@@ -81,7 +81,7 @@ static inline int inverse_mod(int p, int x) {
   return a < 0 ? p + a : a;
 }
 
-/** Multiply two numbers mod [
+/** Multiply two numbers mod p.
  *
  * Be careful about overflow!
  */
