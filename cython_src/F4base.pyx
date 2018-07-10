@@ -439,6 +439,9 @@ cdef class Polynomial(object):
         else:
             return '0'
 
+    def __len__(self):
+        return self.c_poly.num_terms
+
     def __add__(Polynomial self, Polynomial other):
         result = Polynomial(ring=self.ring)
         if not Poly_add(&self.c_poly, &other.c_poly, &result.c_poly,
@@ -926,7 +929,7 @@ cdef class Ideal(object):
 
     def normal_form(self, f):
         return self._normalize(f, self.groebner_basis())
-    
+
     def _normalize(self, f, G):
         """
         If a term of f is divisible by a head term of g in G, then kill it by
@@ -974,5 +977,4 @@ cdef class Ideal(object):
                 result.append(h)
         result.sort(key=lambda f: f.head_term, reverse=True)
         self._reduced_groebner_basis = result
-        return result               
-        
+        return result
