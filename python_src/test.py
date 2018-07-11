@@ -79,5 +79,6 @@ print('Cyclic-4:')
 print(R4.Ideal(C4).reduced_groebner_basis())
 print()
 print('The size of the Cyclic-5 basis:')
-print(len(R5.Ideal(C5).reduced_groebner_basis()))
+G = R5.Ideal(C5).reduced_groebner_basis()
+print(len(G))
 

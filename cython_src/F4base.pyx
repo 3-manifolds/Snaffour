@@ -46,6 +46,8 @@ cdef extern from "F4.h":
     cdef int  Term_revlex_diff(Term_t *t, Term_t *s, int rank)
     cdef void Term_print(Term_t *t)
 
+    cdef int inverse_mod(int p, int x);
+    
     cdef struct coeff_s:
         int total_degree
         int value
@@ -63,10 +65,11 @@ cdef extern from "F4.h":
     cdef void Poly_init(Polynomial_t* P, size_t size, Term_t* terms, coeff_t* coefficients,
                         int rank)
     cdef void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank)
+    cdef bool Poly_equals(Polynomial_t* P, Polynomial_t *Q)
     cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank)
-    cdef bool Poly_make_row(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
+    cdef bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank)
     cdef bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
                            size_t num_rows)
     cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
@@ -109,17 +112,17 @@ cdef class PolyRing(object):
         return c if c < self.CENTER else c - self.BIG_PRIME
 
     cpdef reduce_coeff(self, c):
-        """
-        Reduce mod P.
-        """
+        """Reduce mod P."""
         return c%self.BIG_PRIME
 
     cpdef negate_coeff(self, int c):
-        """
-        Negate mod P.
-        """
+        """Negate mod P."""
         return self.BIG_PRIME - c
 
+    cpdef invert_coeff(self, int c):
+        """Compute the reciprocal mod P."""
+        return inverse_mod(self.BIG_PRIME, c);
+    
     def Term(self, *args):
         return Term(*args, ring=self)
 
@@ -385,6 +388,7 @@ cdef class Polynomial(object):
     a*b + b*c - b*d - d^2
     """
     cdef Polynomial_t c_poly
+    cdef _hash
     cdef public PolyRing ring
     cdef public is_nonzero
     cdef public Monomial head_monomial
@@ -401,6 +405,7 @@ cdef class Polynomial(object):
 
     def __init__(self, *args, PolyRing ring=no_ring):
         cdef int i, size
+        self._hash = None
         self.ring = ring
         if not args:
             self.is_nonzero = False
@@ -442,6 +447,17 @@ cdef class Polynomial(object):
     def __len__(self):
         return self.c_poly.num_terms
 
+    def __hash__(self):
+        # This could surely be much more efficient!
+        if self._hash is None:
+            self._hash = 0
+            for m in self.monomials:
+                self._hash ^= hash(m)
+        return self._hash
+
+    def __eq__(Polynomial self, Polynomial other):
+        return Poly_equals(&self.c_poly, &other.c_poly) == 1
+    
     def __add__(Polynomial self, Polynomial other):
         result = Polynomial(ring=self.ring)
         if not Poly_add(&self.c_poly, &other.c_poly, &result.c_poly,
@@ -568,25 +584,47 @@ cdef class Pair:
     >>> P.left_poly, P.right_poly, P.lcm
     (a*b + b*c + a*d + c*d, a + b + c + d, a*b)
     """
-    cdef public left_poly, right_poly, left_head, right_head, is_disjoint, lcm, degree
+    cdef public Polynomial left_poly, right_poly
+    cdef public Term left_head, right_head, lcm
+    cdef public int is_disjoint
 
-    def __init__(self, f, g):
+    def __init__(self, Polynomial f, Polynomial g):
+        cdef Term_t head_product
+        assert f.ring is g.ring
+        self.lcm = Term(ring=f.ring)
         self.left_poly, self.right_poly = f, g
-        f_head, g_head = f.head_term, g.head_term
-        self.left_head, self.right_head = f_head, g_head
-        self.lcm = lcm = f_head | g_head
-        self.degree = lcm.total_degree
+        self.left_head  = f.head_term
+        self.right_head = g.head_term
+        Term_lcm(self.left_head.c_term, self.right_head.c_term, self.lcm.c_term)
+        self.lcm.total_degree = Term_total_degree(self.lcm.c_term, f.ring.rank)
+        Term_multiply(self.left_head.c_term, self.right_head.c_term, &head_product)
+        self.is_disjoint = Term_equals(&head_product, self.lcm.c_term)
 
     def __repr__(self):
         return '<%s, %s>'%(self.left_poly, self.right_poly)
 
+    def spoly(self):
+        ring = self.left_head.ring
+        a = ring.invert_coeff(self.left_poly.head_monomial.coefficient)
+        b = ring.invert_coeff(self.right_poly.head_monomial.coefficient)
+        return (a*(self.lcm // self.left_head)*self.left_poly -
+                b*(self.lcm // self.right_head)*self.right_poly)
+
+    def is_reducing(self):
+        f = self.spoly()
+        if f.head_term < self.left_head or f.head_term < self.right_head:
+           return True 
+    
 cdef class Ideal(object):
     cdef public generators
+    cdef public monic_generators
     cdef public ring
     cdef public _groebner_basis
     cdef public _reduced_groebner_basis
     cdef public echelons
     cdef public preprocs
+    cdef public select
+    cdef public history
 
     def __init__(self, *args, PolyRing ring=no_ring):
         if ring is no_ring:
@@ -598,8 +636,10 @@ cdef class Ideal(object):
         self.ring = ring
         self.echelons = []
         self.preprocs = []
+        self.history = []
         self._groebner_basis = None
         self._reduced_groebner_basis = None
+        self.select = self.normal_select
 
     cdef mult(self, prod):
         """
@@ -627,6 +667,14 @@ cdef class Ideal(object):
             nonheads |= {*f.terms()[1:]}
         nonheads -= {f.head_term for f in F}
         return nonheads
+
+    def set_select(self, name):
+        if name == 'id':
+            self.select = self.id_select
+        elif name == 'normal':
+            self.select = self.normal_select
+        else:
+            raise ValueError('Unknown selector')
 
     def echelon_form(self, poly_list):
         """
@@ -677,6 +725,16 @@ cdef class Ideal(object):
         free(answer)
         return result
 
+    cdef make_monic_generators(self):
+        cdef Polynomial f, g
+        self.monic_generators = []
+        for f in self.generators:
+             g = Polynomial(ring=self.ring)
+             if not Poly_make_monic(&f.c_poly, &g.c_poly, self.ring.BIG_PRIME, self.ring.rank):
+                 raise RuntimeError('Out of memory!')
+             g.decorate()
+             self.monic_generators.append(g)
+    
     def groebner_basis(self):
         """
         Use the F4 algorithm to find a grevlex Gröbner basis of the ideal
@@ -686,10 +744,12 @@ cdef class Ideal(object):
         """
         if self._groebner_basis is not None:
             return self._groebner_basis
+        self.make_monic_generators()
         G, P = [], set()
-        for f in self.generators:
+        for f in self.monic_generators:
             G, P = self.update(G, P, f)
-        while P:
+        while True:
+            self.history.append((list(G), list(P)))
             P_new = self.select(P)
             P -= P_new
             L = [(p.lcm // p.left_head, p.left_poly) for p in P_new]
@@ -697,6 +757,8 @@ cdef class Ideal(object):
             tilde_F_plus = self.reduce(L, G)
             for h in tilde_F_plus:
                 G, P = self.update(G, P, h)
+            if len(P) == 0:
+                break
         self._groebner_basis = G
         return G
 
@@ -710,10 +772,8 @@ cdef class Ideal(object):
         """
         The normal selector.
         """
-        d = min(p.degree for p in pairs)
-        return {p for p in pairs if p.degree == d}
-
-    select = normal_select
+        d = min(p.lcm.total_degree for p in pairs)
+        return {p for p in pairs if p.lcm.total_degree == d}
 
     def reduce(self, L, G):
         r"""
@@ -780,7 +840,7 @@ cdef class Ideal(object):
         by definition contains *all* terms of the new element.
         """
         cdef Term s, g_head
-        cdef Term sovergh = Term(ring=self.ring)
+        cdef Term s_over_ghead = Term(ring=self.ring)
         cdef reducer, nonheads
         # Start by simplifying the unevaluated products in L.
         S = set(self.mult(self.simplify(t, f)) for t, f in L)
@@ -791,11 +851,12 @@ cdef class Ideal(object):
             for g in G:
                 g_head = g.head_term
                 # if HT(g) divides s
-                if Term_divide(s.c_term, g_head.c_term, sovergh.c_term):
-                    # Make sovergh into a valid Term by adding its total_degree attribute
-                    sovergh.total_degree = Term_total_degree(sovergh.c_term, self.ring.rank)
+                if Term_divide(s.c_term, g_head.c_term, s_over_ghead.c_term):
+                    # Make s_over_ghead into a valid Term by adding its total_degree attribute
+                    s_over_ghead.total_degree = Term_total_degree(s_over_ghead.c_term,
+                                                                  self.ring.rank)
                     # Add the simplified reducer.
-                    reducer = self.mult(self.simplify(sovergh, g))
+                    reducer = self.mult(self.simplify(s_over_ghead, g))
                     S.add(reducer)
                     # Adjoin the  non-head terms of this new element of S.
                     nonheads.update(reducer.terms()[1:])
@@ -804,43 +865,42 @@ cdef class Ideal(object):
 
     def update(self, G, P, h):
         """
-        Use the two "Buchberger Criteria" to update a basis and a list of critical
-        pairs using a Polynomial h.  All pairs involving h are added to P, then
-        useless pairs are removed.  Elements of G whose head term is divisible
-        by h are removed, and finally h is added to G.
+        Use the two "Buchberger Criteria" to update a partial basis and a list of
+        critical pairs to accommodate a new Polynomial h.  All pairs involving h
+        are added to P, then useless pairs are removed.  Elements of G whose
+        head term is divisible by h are removed, and finally h is added to G.
 
         See page 230 of "Gröbner Bases" by T. Becker and V. Weispfenning.
         """
         cdef Term p_lcm, q_lcm
         cdef Term h_head = h.head_term
-        C, D, E, P_new = [Pair(h,g) for g in G if g != h], [], [], []
-        # Discard (p, h) if its lcm is divisible by the lcm of another pair (q, h),
-        # unless the head terms of p are disjoint.  The 2nd Criterion implies
-        # that (p,h) is useless in this case.
+        C, D, E, P_new = [Pair(g, h) for g in G if g != h], [], [], []
+        # Discard (p, h) if its lcm is divisible by the lcm of another pair (q, h)
+        # that we have already saved (unless the head terms of p and h are disjoint;
+        # disjoint pairs are dealt with later). The 2nd Criterion implies
+        # that (p, h) is useless in this case.
         while C:
             p, useless = C.pop(), False
             p_lcm = p.lcm
-            lcm_degree = p_lcm.degree
-            if p.left_head*p.right_head != p_lcm:
-                p.is_disjoint = False
+            if not p.is_disjoint:
                 for q in chain(C, D):
                     q_lcm = q.lcm
                     if Term_divides(q_lcm.c_term, p_lcm.c_term):
                         useless = True
                         break
-            else:
-                p.is_disjoint = True
             if not useless:
                 D.append(p)
-        # Discard pairs with disjoint head terms.  (1st Criterion)
+        # Finally, discard pairs with disjoint head terms.  (1st Criterion)
         E = [p for p in D if not p.is_disjoint]
-        # Remove (f, g) from P if (f, h) and (g, h) are in P.  (2nd Criterion)
+        # We don't need (f, g) if we have both (f, h) and (g, h).  (2nd Criterion)
         for p in P:
             p_lcm = p.lcm
-            lcm_degree = p_lcm.degree
-            if (not Term_divides(h_head.c_term, p_lcm.c_term) or
-                h_head | p.left_head == p_lcm or
-                h_head | p.right_head == p_lcm):
+            # If both lcm(f,h) and lcm(g,h) properly divide lcm(f,g) then they
+            # are both in E, so we don't need to put (f,g) in P_new.
+            if not (Term_divides(h_head.c_term, p_lcm.c_term) and
+                    # This could be done in C
+                    (h_head | p.left_head != p_lcm and
+                     h_head | p.right_head != p_lcm)):
                 P_new.append(p)
         # Add the pairs in E.
         P_new += E
@@ -902,30 +962,33 @@ cdef class Ideal(object):
         """
         cdef Term q_head = q.head_term
         cdef Term f_head
-        cdef Term toveru = Term(ring=self.ring)
+        cdef Term t_over_u = Term(ring=self.ring)
         cdef Term_t u
         cdef Term_t uq_head
+        result = (t, q) # The default, if there is nothing better.
         for F_ech, F in zip(self.echelons, self.preprocs):
              for f in F:
                  f_head = f.head_term
-                 # Look for u, a divisor of t, such that u*q = f
+                 # We want u, a divisor of t, such that u*HT(q) = HT(f)
                  if (Term_divide(f_head.c_term, q_head.c_term, &u) and
-                     Term_divide(t.c_term, &u, toveru.c_term)):
+                     Term_divide(t.c_term, &u, t_over_u.c_term)):
                      # We are guaranteed a unique p in F_ech with HT(f) = HT(p)
                      p = F_ech[f_head]
-                     if Term_total_degree(&u, self.ring.rank) == 0:
-                         # Avoid infinite recursion.
-                         return (t, p)
-                     elif Term_equals(t.c_term, &u):
+                     if Term_equals(t.c_term, &u):
                          # The simplified term is 1.  No further reduction is possible.
                          return (Term(ring=self.ring), p)
+                     elif Term_total_degree(&u, self.ring.rank) == 0:
+                         # u == 1.  Avoid infinite recursion, but continue through the
+                         # loop in case there is something better later on.
+                         result = (t, p)
+                         continue
                      else:
-                         # Make toveru into a valid Term by adding its total_degree attribute.
-                         toveru.total_degree = Term_total_degree(toveru.c_term, self.ring.rank)
+                         # Make t_over_u a valid Term by adding its total_degree attribute.
+                         t_over_u.total_degree = Term_total_degree(t_over_u.c_term, self.ring.rank)
                          # Recursively search for a simpler pair.
-                         return self.simplify(toveru, p)
-        # No simplification was possible.  Just return the input
-        return (t, q)
+                         return self.simplify(t_over_u, p)
+        # Nothing more left to do.
+        return result
 
     def normal_form(self, f):
         return self._normalize(f, self.groebner_basis())

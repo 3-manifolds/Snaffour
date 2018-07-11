@@ -78,6 +78,8 @@ typedef struct coeff_s {
   int value;
 } coeff_t;
 
+int inverse_mod(int p, int x);
+
 /** A Polynomial
  * 
  * We use separate arrays for terms and coefficients to avoid wasting memory
@@ -120,6 +122,7 @@ void Poly_free(Polynomial_t* P);
 void Poly_print(Polynomial_t* P, int rank);
 void Poly_init(Polynomial_t* P, size_t size, Term_t* terms, coeff_t* coefficients, int rank);
 void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank);
+bool Poly_equals(Polynomial_t* P, Polynomial_t *Q);
 bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank);

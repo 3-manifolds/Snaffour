@@ -1,7 +1,7 @@
 /*   This file is part of the program Snaffour.
  *
  *   Copyright (C) 2018 by Marc Culler, Nathan Dunfield, Matthias Görner
- *   and others. 
+ *   and others.
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@
 /** Struct to hold the result of an extended gcd computation.
  *
  * For inputs x and y, this struct is meant to hold d, a and b where
- * d is a greatest common divisor (with arbitrary sign) and d = ax + by. 
+ * d is a greatest common divisor (with arbitrary sign) and d = ax + by.
  */
 
 typedef struct gcd_s {
@@ -73,7 +73,7 @@ static void x_gcd(int x, int y, gcd_t* answer) {
 /** Compute the inverse of a number modulo p
  */
 
-static inline int inverse_mod(int p, int x) {
+int inverse_mod(int p, int x) {
   int a;
   gcd_t xgcd = {.d=0, .a=0, .b=0};
   x_gcd(x, p, &xgcd);
@@ -303,6 +303,21 @@ bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
   return Poly_p_plus_aq(P, prime - 1, Q, answer, prime, rank);
 }
 
+bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
+  if (P->num_terms != Q->num_terms) {
+    return false;
+  }
+  for (int N = 0; N < P->num_terms; N++) {
+    if (! Term_equals(P->terms + N, Q->terms + N)) {
+      return false;
+    }
+    if (P->coefficients[N].value != Q->coefficients[N].value) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Use bisection to find the index of the given term in P->terms for a Polynomial P.
  *
  * Return false if the term is not in P->terms.
@@ -389,24 +404,34 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
   return true;
 }
 
-/** Copy a Polynomial, while dividing by the head coefficient.
+/** Divide a polynomial by the head coefficient.
+ *
+ * If the pointers P and answer are not identical, new terms and coefficient
+ * arrays are allocated for the answer.  Otherwise, the coefficients of P
+ * are modified in place.
  */
 
 bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank) {
-  int N = 0, a_inverse;
+  int N = 0, a_inverse = inverse_mod(prime, P->coefficients[0].value);
   coeff_t p_coeff;
-  if (! Poly_alloc(answer, P->num_terms, rank)) {
-    return false;
+  if (P != answer) {
+    if (! Poly_alloc(answer, P->num_terms, rank)) {
+      return false;
+    }
+    for (N=0; N < P->num_terms; N++) {
+      answer->terms[N] = P->terms[N];
+      p_coeff = P->coefficients[N];
+      p_coeff.value = multiply_mod(prime, a_inverse, p_coeff.value);
+      answer->coefficients[N] = p_coeff;
+    }
+    answer->num_terms = N;
+    answer->rank = rank;
+  } else {
+    /* Modify the coefficients in place. */
+    for (N=0; N < P->num_terms; N++) {
+      P->coefficients[N].value = multiply_mod(prime, a_inverse, P->coefficients[N].value);
+    }
   }
-  a_inverse = inverse_mod(prime, P->coefficients[0].value);
-  for (N=0; N < P->num_terms; N++) {
-    answer->terms[N] = P->terms[N];
-    p_coeff = P->coefficients[N];
-    p_coeff.value = multiply_mod(prime, a_inverse, p_coeff.value);
-    answer->coefficients[N] = p_coeff;
-  }
-  answer->num_terms = N;
-  answer->rank = rank;
   return true;
 }
 
@@ -446,7 +471,7 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, int g_coeff, int pri
 }
 
 /** Echelon Form
- * 
+ *
  * Input an array P of Polynomial pointers, and an array answer of unitialized
  * polynomials.  Both arrays should have size num_rows.  Each Polynomial gets
  * divided by its leading coefficient while being copied into the answer
