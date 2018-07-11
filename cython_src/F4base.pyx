@@ -655,18 +655,14 @@ cdef class Ideal(object):
         result.decorate()
         return result
 
-    cdef non_heads(self, F):
+    cdef heads_and_tails(self, F):
         """
-        Return a list of all terms which appear in one of the Polynomials represented
-        by the unevaluated products in F, but do not appear as a head term of any
-        of those Polynomials.
+        Return a list of all terms which appear in one of the Polynomials in F, but
+        do not appear as a head term of any of those Polynomials.
         """
-        cdef f, nonheads
-        nonheads = set()
-        for f in F:
-            nonheads |= {*f.terms()[1:]}
-        nonheads -= {f.head_term for f in F}
-        return nonheads
+        heads = {f.head_term for f in F}
+        terms = set.union(*(set(f.terms()) for f in F))
+        return heads, terms - heads
 
     def set_select(self, name):
         if name == 'id':
@@ -829,25 +825,16 @@ cdef class Ideal(object):
           * F = L1 + F1, where L1 contains the evaluated simplifications of the
             pairs in L, such that F contains a simplified reducing polynomial for
             every non-head term in F which admits a reduction modulo G.
-
-        NOTE: Faugère's F4 paper contains an error in the pseudo-code describing
-        this subalgorithm.  The main loop is controlled by "while T(F) != Done".
-        The loop operates on an arbitrary element of T(F) \ Done, which is
-        removed from Done.  As elements are added to F, T(F) becomes larger by
-        adding the terms of the new element.  However, the head term of the new
-        element should not be added.  Doing so causes an infinite loop.  The
-        pseudo-code presented in the paper does add the head term, since T(F)
-        by definition contains *all* terms of the new element.
         """
         cdef Term s, g_head
         cdef Term s_over_ghead = Term(ring=self.ring)
-        cdef reducer, nonheads
+        cdef reducer, heads, tails
         # Start by simplifying the unevaluated products in L.
         S = set(self.mult(self.simplify(t, f)) for t, f in L)
         # Add (simplified) u*g, g in G, which reduce non-head terms of these products.
-        nonheads = self.non_heads(S)
-        while nonheads:
-            s = nonheads.pop()
+        heads, tails = self.heads_and_tails(S)
+        while tails:
+            s = tails.pop()
             for g in G:
                 g_head = g.head_term
                 # if HT(g) divides s
@@ -858,8 +845,8 @@ cdef class Ideal(object):
                     # Add the simplified reducer.
                     reducer = self.mult(self.simplify(s_over_ghead, g))
                     S.add(reducer)
-                    # Adjoin the  non-head terms of this new element of S.
-                    nonheads.update(reducer.terms()[1:])
+                    heads.add(reducer.head_term)
+                    tails.union({t for t in reducer.terms()[1:] if t not in heads})
                     break
         return S
 
@@ -890,7 +877,7 @@ cdef class Ideal(object):
                         break
             if not useless:
                 D.append(p)
-        # Finally, discard pairs with disjoint head terms.  (1st Criterion)
+        # This is where we discard pairs with disjoint head terms.  (1st Criterion)
         E = [p for p in D if not p.is_disjoint]
         # We don't need (f, g) if we have both (f, h) and (g, h).  (2nd Criterion)
         for p in P:
