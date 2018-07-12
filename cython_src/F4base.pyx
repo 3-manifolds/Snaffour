@@ -662,6 +662,8 @@ cdef class Ideal(object):
     def set_select(self, name):
         if name == 'id':
             self.select = self.id_select
+        elif name == 'buchberger':
+            self.select = self.buchberger_select
         elif name == 'normal':
             self.select = self.normal_select
         else:
@@ -757,6 +759,13 @@ cdef class Ideal(object):
         """
         return set(pairs)
 
+    def buchberger_select(self, pairs):
+        """
+        Select a single pair.  This converts F4 into the Buchberger algorithm.
+        """
+        for p in pairs:
+            return {p}
+    
     def normal_select(self, pairs):
         """
         The normal selector.
