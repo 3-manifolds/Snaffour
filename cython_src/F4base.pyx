@@ -221,7 +221,9 @@ cdef class Term(object):
         return self._hash
 
     def __eq__(self, Term other):
-        return Term_equals(self.c_term, other.c_term) == 1
+        if isinstance(self, Term) and isinstance(other, Term):
+            return Term_equals(self.c_term, other.c_term) == 1
+        return False
 
     def __lt__(self, Term other):
         if self.ring is other.ring:
@@ -287,7 +289,9 @@ cdef class Term(object):
         """
         Return True or False indicating whether this Term divides the other.
         """
-        return Term_divides(self.c_term, other.c_term) == 1
+        if isinstance(self, Term) and isinstance(other, Term):
+            return Term_divides(self.c_term, other.c_term) == 1
+        return False
 
     def mult(self, Polynomial other):
         """
@@ -735,17 +739,15 @@ cdef class Ideal(object):
         G, P = [], set()
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
-        while True:
+        while P:
             self.history.append((list(G), list(P)))
             P_new = self.select(P)
-            P -= P_new
             L = [(p.lcm // p.left_head, p.left_poly) for p in P_new]
             L += [(p.lcm // p.right_head, p.right_poly) for p in P_new]
             tilde_F_plus = self.reduce(L, G)
+            P = P - P_new
             for h in tilde_F_plus:
                 G, P = self.update(G, P, h)
-            if len(P) == 0:
-                break
         self._groebner_basis = G
         return G
 
