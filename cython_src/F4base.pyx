@@ -47,7 +47,7 @@ cdef extern from "F4.h":
     cdef void Term_print(Term_t *t)
 
     cdef int inverse_mod(int p, int x);
-    
+
     cdef struct coeff_s:
         int total_degree
         int value
@@ -122,7 +122,7 @@ cdef class PolyRing(object):
     cpdef invert_coeff(self, int c):
         """Compute the reciprocal mod P."""
         return inverse_mod(self.BIG_PRIME, c);
-    
+
     def Term(self, *args):
         return Term(*args, ring=self)
 
@@ -457,7 +457,7 @@ cdef class Polynomial(object):
 
     def __eq__(Polynomial self, Polynomial other):
         return Poly_equals(&self.c_poly, &other.c_poly) == 1
-    
+
     def __add__(Polynomial self, Polynomial other):
         result = Polynomial(ring=self.ring)
         if not Poly_add(&self.c_poly, &other.c_poly, &result.c_poly,
@@ -613,8 +613,8 @@ cdef class Pair:
     def is_reducing(self):
         f = self.spoly()
         if f.head_term < self.left_head or f.head_term < self.right_head:
-           return True 
-    
+           return True
+
 cdef class Ideal(object):
     cdef public generators
     cdef public monic_generators
@@ -622,7 +622,7 @@ cdef class Ideal(object):
     cdef public _groebner_basis
     cdef public _reduced_groebner_basis
     cdef public echelons
-    cdef public preprocs
+    cdef public matrices
     cdef public select
     cdef public history
 
@@ -635,7 +635,7 @@ cdef class Ideal(object):
             self.generators = args
         self.ring = ring
         self.echelons = []
-        self.preprocs = []
+        self.matrices = []
         self.history = []
         self._groebner_basis = None
         self._reduced_groebner_basis = None
@@ -654,15 +654,6 @@ cdef class Ideal(object):
             raise RuntimeError('Out of memory!')
         result.decorate()
         return result
-
-    cdef heads_and_tails(self, F):
-        """
-        Return a list of all terms which appear in one of the Polynomials in F, but
-        do not appear as a head term of any of those Polynomials.
-        """
-        heads = {f.head_term for f in F}
-        terms = set.union(*(set(f.terms()) for f in F))
-        return heads, terms - heads
 
     def set_select(self, name):
         if name == 'id':
@@ -730,7 +721,7 @@ cdef class Ideal(object):
                  raise RuntimeError('Out of memory!')
              g.decorate()
              self.monic_generators.append(g)
-    
+
     def groebner_basis(self):
         """
         Use the F4 algorithm to find a grevlex Gröbner basis of the ideal
@@ -795,7 +786,7 @@ cdef class Ideal(object):
         """
         F = self.preprocess(L, G)
         # Simplify just iterates through the rows of F, so a list is fine.
-        self.preprocs.append(F)
+        self.matrices.append(F)
         F_ech = self.echelon_form(F)
         # Sinplify looks up echelon rows by their unique head term.  So use a dict.
         self.echelons.append({f.head_term: f for f in F_ech})
@@ -804,6 +795,15 @@ cdef class Ideal(object):
         # head term of a polynomial in F.  These get added to G.
         heads = {f.head_term for f in F}
         return {f for f in F_ech if f.head_term not in heads}
+
+    cdef heads_and_tails(self, F):
+        """
+        Return a list of all terms which appear in one of the Polynomials in F, but
+        do not appear as a head term of any of those Polynomials.
+        """
+        heads = {f.head_term for f in F}
+        terms = set.union(*(set(f.terms()) for f in F))
+        return heads, terms - heads
 
     def preprocess(self, L, G):
         """
@@ -822,15 +822,17 @@ cdef class Ideal(object):
           * G, a set of polynomials (to be improved to a Groebner basis.)
 
         OUTPUT:
-          * F = L1 + F1, where L1 contains the evaluated simplifications of the
-            pairs in L, such that F contains a simplified reducing polynomial for
-            every non-head term in F which admits a reduction modulo G.
+          * F, a set of polynomials such that:
+            o F contains a simplification of t*f for every (t, f) in L
+            o For any non-head term T of a polynomial in F, if T is reducible
+              modulo G then F contains a simplified reducing polynomial for T.
         """
         cdef Term s, g_head
         cdef Term s_over_ghead = Term(ring=self.ring)
         cdef reducer, heads, tails
+        cdef int rank = self.ring.rank
         # Start by simplifying the unevaluated products in L.
-        S = set(self.mult(self.simplify(t, f)) for t, f in L)
+        S = {self.mult(self.simplify(t, f)) for t, f in L}
         # Add (simplified) u*g, g in G, which reduce non-head terms of these products.
         heads, tails = self.heads_and_tails(S)
         while tails:
@@ -840,8 +842,7 @@ cdef class Ideal(object):
                 # if HT(g) divides s
                 if Term_divide(s.c_term, g_head.c_term, s_over_ghead.c_term):
                     # Make s_over_ghead into a valid Term by adding its total_degree attribute
-                    s_over_ghead.total_degree = Term_total_degree(s_over_ghead.c_term,
-                                                                  self.ring.rank)
+                    s_over_ghead.total_degree = Term_total_degree(s_over_ghead.c_term, rank)
                     # Add the simplified reducer.
                     reducer = self.mult(self.simplify(s_over_ghead, g))
                     S.add(reducer)
@@ -877,7 +878,7 @@ cdef class Ideal(object):
                         break
             if not useless:
                 D.append(p)
-        # This is where we discard pairs with disjoint head terms.  (1st Criterion)
+        # Finally, discard pairs with disjoint head terms.  (1st Criterion)
         E = [p for p in D if not p.is_disjoint]
         # We don't need (f, g) if we have both (f, h) and (g, h).  (2nd Criterion)
         for p in P:
@@ -952,26 +953,31 @@ cdef class Ideal(object):
         cdef Term t_over_u = Term(ring=self.ring)
         cdef Term_t u
         cdef Term_t uq_head
+        cdef int td
+        cdef int rank = self.ring.rank
         result = (t, q) # The default, if there is nothing better.
-        for F_ech, F in zip(self.echelons, self.preprocs):
+        if t.total_degree == 0:
+            return result
+        for F_ech, F in zip(self.echelons, self.matrices):
              for f in F:
                  f_head = f.head_term
                  # We want u, a divisor of t, such that u*HT(q) = HT(f)
                  if (Term_divide(f_head.c_term, q_head.c_term, &u) and
                      Term_divide(t.c_term, &u, t_over_u.c_term)):
+                     # Make t_over_u a valid Term by adding its total_degree attribute.
+                     t_over_u.total_degree = td = Term_total_degree(t_over_u.c_term, rank)
                      # We are guaranteed a unique p in F_ech with HT(f) = HT(p)
                      p = F_ech[f_head]
                      if Term_equals(t.c_term, &u):
-                         # The simplified term is 1.  No further reduction is possible.
-                         return (Term(ring=self.ring), p)
-                     elif Term_total_degree(&u, self.ring.rank) == 0:
-                         # u == 1.  Avoid infinite recursion, but continue through the
+                         # t // u == 1.  No further reduction is possible.
+                         return (t_over_u, p)
+                     elif Term_equals(t.c_term, t_over_u.c_term):
+                         # t // u == t.  Avoid infinite recursion, but continue with the
                          # loop in case there is something better later on.
+                         # Note that we cannot use t_over_u since it changes in the loop.
                          result = (t, p)
                          continue
                      else:
-                         # Make t_over_u a valid Term by adding its total_degree attribute.
-                         t_over_u.total_degree = Term_total_degree(t_over_u.c_term, self.ring.rank)
                          # Recursively search for a simpler pair.
                          return self.simplify(t_over_u, p)
         # Nothing more left to do.
