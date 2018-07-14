@@ -27,6 +27,7 @@
 
 from __future__ import print_function
 from collections import Iterable
+from itertools import combinations
 from libc.stdlib cimport malloc, free
 from libc.stdint cimport int64_t
 
@@ -236,6 +237,11 @@ cdef class Term(object):
                 return False
         else:
             raise ValueError('Terms over different rings are incomparable.')
+
+    def __le__(self, Term other):
+        if self == other or self < other:
+            return True
+        return False
 
     def __floordiv__(Term self, Term other):
         cdef Term answer = Term(ring=self.ring)
@@ -605,7 +611,7 @@ cdef class Pair:
         self.is_disjoint = Term_equals(&head_product, self.lcm.c_term)
 
     def __repr__(self):
-        return '<%s, %s>'%(self.left_poly, self.right_poly)
+        return 'Pair:<%s,\n%s>'%(self.left_poly, self.right_poly)
 
     def spoly(self):
         ring = self.left_head.ring
@@ -668,6 +674,21 @@ cdef class Ideal(object):
             self.select = self.normal_select
         else:
             raise ValueError('Unknown selector')
+
+    def validate_loop(self, G, P):
+        """
+        The proof of correctness of the F4 algorithm apparently implies that at
+        at the beginning of each iteration of the main loop the s-polynomial of
+        each Pair(g1, g2) reduces to 0 modulo G.  This method verifies this
+        condition.
+        """
+        for p in {Pair(g1, g2) for g1, g2 in combinations(G, 2)}:
+            if p in P:
+                continue
+            s = p.spoly()
+            f = self._normalize(s, G)
+            if f.is_nonzero:
+                return p
 
     def echelon_form(self, poly_list):
         """
@@ -742,7 +763,7 @@ cdef class Ideal(object):
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
-            self.history.append((list(G), list(P)))
+            self.history.append((list(G), set(P)))
             P_new = self.select(P)
             L = [(p.lcm // p.left_head, p.left_poly) for p in P_new]
             L += [(p.lcm // p.right_head, p.right_poly) for p in P_new]
@@ -764,8 +785,11 @@ cdef class Ideal(object):
         Select a single pair.  This converts F4 into the Buchberger algorithm.
         """
         for p in pairs:
-            return {p}
-    
+            return set((p,))
+        # This variant works better, it seems.
+        #s = sorted(pairs, key=lambda p: p.lcm.total_degree)
+        #return set((s[0],))
+
     def normal_select(self, pairs):
         """
         The normal selector.
