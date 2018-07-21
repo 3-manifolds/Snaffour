@@ -663,7 +663,7 @@ cdef class Ideal(object):
     cdef public echelons
     cdef public matrices
     cdef public select
-    cdef public history
+    #cdef public history
     cdef public last_S
     
     def __init__(self, *args, PolyRing ring=no_ring):
@@ -676,7 +676,7 @@ cdef class Ideal(object):
         self.ring = ring
         self.echelons = []
         self.matrices = []
-        self.history = []
+        #self.history = []
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
@@ -810,22 +810,18 @@ cdef class Ideal(object):
             return self._groebner_basis
         self.make_monic_generators()
         G, P = [], set()
-        self.history.append(F4State(G, P, set()))
+        #self.history.append(F4State(G, P, set()))
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
             Sel = self.select(P)
-            L = [p.left_prod() for p in Sel] + [p.right_prod() for p in Sel]
-            self.history.append(F4State(G, P, Sel))
+            #self.history.append(F4State(G, P, Sel))
+            L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
             tilde_F_plus = self.reduce(L, G)
             P = P - Sel
             for h in tilde_F_plus:
                 G, P = self.update(G, P, h)
         self._groebner_basis = G
-        # Passing this test does not imply correctness, indicating that some pairs are
-        # not being considered with some selectors.
-        #for n in range(len(self.history) - 2):
-        #    self.validate_loop(n, self.history[n+1].G)
         return G
 
     def id_select(self, pairs):
@@ -853,14 +849,15 @@ cdef class Ideal(object):
 
     def reduce(self, L, G):
         r"""
-        Start with a list L containing left and right elements from a selected
-        set of critical pairs.  Use preprocessing and row echelon form to compute
-        a set of polynomials to be added to the partial grobner basis G.
+        Start with a pair L of lists containing left and right elements from a
+        selected set of critical pairs.  Use preprocessing and row echelon form
+        to compute a set of polynomials to be added to the partial grobner basis
+        G.
 
         This is the Reduction subalgorithm of Faugère's F4.
 
         INPUT:
-          * L, a set of pairs (t, f), t a term and f a polynomial
+          * L =(L1, L2), each a list of pairs (t, f), t a term and f a polynomial
           * G, a set of polynomials
 
         SIDE EFFECTS:
@@ -879,7 +876,7 @@ cdef class Ideal(object):
         # Simplify just iterates through the rows of F, so a list is fine.
         self.matrices.append(F)
         F_ech = self.echelon_form(F)
-        # Sinplify looks up echelon rows by their unique head term.  So use a dict.
+        # Simplify looks up echelon rows by their unique head term.  So use a dict.
         self.echelons.append({f.head_term: f for f in F_ech})
         # Return the set that Faugère calls $\tilde F_d^+$.  It contains only
         # those rows of the echelon form whose head term is new, i.e. not the
@@ -899,21 +896,41 @@ cdef class Ideal(object):
     def preprocess(self, L, G):
         """
         This method returns the matrix (as a list of polynomials) which will be
-        reduced to echelon form in the main loop.  The input consists of the
+        reduced to echelon form in the main loop.  The input L consists of the
         left and right products (momomial times polynomial) for the selected
         pairs.  For each pair, the difference between these two products is the
-        s-polynomial. Each of the products is replaced by its simplification.
-        Faugère proves that the final G will be a Groebner basis if, for each
-        distinct g1, g2 in G the s-polynomial of the simplifications of g1 and
-        g2 reduces to 0 modulo G. So it is sufficient that the simplifications
-        of the left and right products of each polynomial in L_n reduces to 0
-        modulo G.  This is accomplished by reducing these polynomials modulo G_n
-        and then adding the reductions to G_n to produce G_n+1.  The reduction
-        will be done automatically by the echelon reduction, producing the
-        reduction as a row of the echelon form, provided that each product t*g
-        which is needed to reduce a term is included in the matrix.  The purpose
-        of the preprocessing step is to add all such multiples of g to the
-        matrix.
+        s-polynomial.  If the s-polynomial does not reduce to 0 modulo G_n then
+        its reduction must be added to G_n when constructing G_n+1.  This will
+        be handled automatically by the echelon reduction, producing the
+        reduction as a row of the echelon form which has a new head term,
+        provided that each product t*g which is used in reducing a term of the
+        s-polynomial is included in the matrix.  The purpose of the
+        preprocessing step is to add all such multiples of elements of G_n to
+        the matrix.
+
+        Unfortunately, there is a serious error in Faugère's statement of his
+        preprocessing subalgorithm which can lead to incorrect computations.  He
+        says to begin by replacing each product in the list L by its
+        simplification.  Faugère proves in Theorem 2.4 that the final G will be
+        a Groebner basis if, for each distinct g1, g2 in G the s-polynomial of
+        the simplifications g1' and g2' has a t-representation with respect to G
+        such that t < lcm(g1, g2).  So it would seem to be sufficient that the
+        simplifications of the left and right products of each polynomial in L_n
+        reduces to 0 modulo G.  The problem with this argument is the degenerate
+        case where g1 and g2 have the same simplification.  Then the
+        s-polynomial of g1' and g2' is zero, and the zero polynomial does not
+        have t-representation by Definition 2.7. In this case the matrix will
+        have two identical rows, both of which appear in a previous matrix, and
+        the new head term which appears in the s-polynomial of g1 and g2 will be
+        missed.  We observed this happening, and producing a non-Groebner basis,
+        with the Cyclic-4 example when using the Buchberger selection process
+        that selects a single pair at random.
+
+        We mention that Faugère omits the proof of correctness of his F4
+        algorithm.  Instead he (mis)states a Theorem from the book by T. Becker
+        and V. Weispfenning and the  mentioned above and says that these
+        two results are used in the proof of correctness.  With that level of
+        detail it is no surprise that degenerate cases will lead to failures.
 
         This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm.
 
@@ -931,9 +948,14 @@ cdef class Ideal(object):
         cdef Term t_over_ghead = Term(ring=self.ring)
         cdef reducer, heads, tails
         cdef int rank = self.ring.rank
-        # Start by simplifying the unevaluated products in L.
-        S = [self.mult(self.simplify(t, f)) for t, f in L]
-        self.history[-1].S = list(S)
+        # Faugère says to start by simplifying the unevaluated products in L.
+        # But doing that leads to wrong answers if two sides of a pair have the
+        # same simplification.  So we don't simplify here.  It would be possible to
+        # use the simplifications when they are different, but in my testing
+        # that was slower.
+        #S = [self.mult(self.simplify(t, f)) for t, f in chain(*L)]
+        S = [self.mult(l) for l in chain(*L)]
+        #self.history[-1].S = list(S)
         # Add (simplified) u*g, g in G, which reduce non-head terms of these products.
         # In Faugère's terminology: heads = Done and tails = T(S) \ Done .
         heads, tails = self.heads_and_tails(S)
