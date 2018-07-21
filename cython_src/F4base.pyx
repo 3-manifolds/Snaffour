@@ -1106,9 +1106,11 @@ cdef class Ideal(object):
                          # t // u == 1.  No further reduction is possible.
                          return (t_over_u, p)
                      elif Term_equals(t.c_term, t_over_u.c_term):
-                         # t // u == t.  Avoid infinite recursion by returning (t, p).
+                         # t // u == t.  Avoid infinite recursion but continue through the
+                         # loop to see if there is something better.  This gives a substantial
+                         # speedup.
                          result = (t, p)
-                         break
+                         continue
                      else:
                          # Recursively search for a simpler pair.
                          return self.simplify(t_over_u, p)
