@@ -664,7 +664,6 @@ cdef class Ideal(object):
     cdef public matrices
     cdef public select
     #cdef public history
-    cdef public last_S
     
     def __init__(self, *args, PolyRing ring=no_ring):
         if ring is no_ring:
@@ -884,14 +883,14 @@ cdef class Ideal(object):
         heads = {f.head_term for f in F}
         return {f for f in F_ech if f.head_term not in heads}
 
-    cdef heads_and_tails(self, F):
+    cdef tails(self, F):
         """
         Return a list of all terms which appear in one of the Polynomials in F, but
         do not appear as a head term of any of those Polynomials.
         """
         heads = {f.head_term for f in F}
         terms = set.union(*(set(f.terms()) for f in F))
-        return heads, terms - heads
+        return terms - heads
 
     def preprocess(self, L, G):
         """
@@ -958,7 +957,8 @@ cdef class Ideal(object):
         #self.history[-1].S = list(S)
         # Add (simplified) u*g, g in G, which reduce non-head terms of these products.
         # In Faugère's terminology: heads = Done and tails = T(S) \ Done .
-        heads, tails = self.heads_and_tails(S)
+        # heads, tails = self.heads_and_tails(S)
+        tails = self.tails(S)
         while tails:
             t = tails.pop()
             for g in G:
@@ -1089,29 +1089,26 @@ cdef class Ideal(object):
         result = (t, q) # The default, if there is nothing better.
         if t.total_degree == 0:
             for F_ech in self.echelons:
-                p = F_ech.get(q_head, None)
-                if p:
-                    return (t, p)
+                if q_head in F_ech:
+                    return(t, F_ech[q_head])
             return result
-        for F_ech, F in zip(self.echelons, self.matrices):
-             for f in F:
-                 f_head = f.head_term
+        for F_ech in self.echelons:
+             for f_head in F_ech:
+                 # This loop is run 324,027,643 times for 8_17!
+                 #f_head = f.head_term
                  # We want u, a divisor of t, such that u*HT(q) = HT(f)
                  if (Term_divide(f_head.c_term, q_head.c_term, &u) and
                      Term_divide(t.c_term, &u, t_over_u.c_term)):
                      # Make t_over_u a valid Term by adding its total_degree attribute.
                      t_over_u.total_degree = Term_total_degree(t_over_u.c_term, rank)
-                     # We are guaranteed a unique p in F_ech with HT(f) = HT(p)
                      p = F_ech[f_head]
                      if Term_equals(t.c_term, &u):
                          # t // u == 1.  No further reduction is possible.
                          return (t_over_u, p)
                      elif Term_equals(t.c_term, t_over_u.c_term):
-                         # t // u == t.  Avoid infinite recursion, but continue with the
-                         # loop in case there is something better later on.
-                         # Note that we cannot use t_over_u since it changes in the loop.
+                         # t // u == t.  Avoid infinite recursion by returning (t, p).
                          result = (t, p)
-                         continue
+                         break
                      else:
                          # Recursively search for a simpler pair.
                          return self.simplify(t_over_u, p)
