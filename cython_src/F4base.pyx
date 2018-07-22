@@ -26,10 +26,11 @@
 #cython: profile=False
 
 from __future__ import print_function
-from collections import Iterable
-from itertools import combinations
+from collections import Iterable, Mapping
+from itertools import combinations, chain
 from libc.stdlib cimport malloc, free
 from libc.stdint cimport int64_t
+import re
 
 cdef extern from "F4.h":
     ctypedef int bool
@@ -78,10 +79,6 @@ cdef extern from "F4.h":
 
 cdef extern from "Python.h":
     pass
-
-from collections import Mapping
-from itertools import chain
-import re
 
 cdef class PolyRing(object):
     """
@@ -559,17 +556,6 @@ cdef class Polynomial(object):
         self.c_poly.coefficients[N].value = m.coefficient
         self.c_poly.num_terms += 1
 
-    def terms(Polynomial self):
-        cdef int i
-        cdef Term a_Term
-        result = []
-        for i in range(self.c_poly.num_terms):
-            a_Term = Term(ring=self.ring)
-            a_Term.c_term[0] = self.c_poly.terms[i]
-            a_Term.total_degree = Term_total_degree(a_Term.c_term, self.ring.rank)
-            result.append(a_Term)
-        return result
-
     @property
     def monomials(self):
         return [self.monomial(n) for n in range(self.c_poly.num_terms)]
@@ -650,10 +636,10 @@ cdef class F4State(object):
     cdef public Sel
     cdef public S
     cdef public G_x
-    
+
     def __init__(self, G, P, Sel):
         self.G, self.P, self.Sel, self.S, self.G_x = list(G), set(P), set(Sel), [], set()
-        
+
 cdef class Ideal(object):
     cdef public generators
     cdef public monic_generators
@@ -661,10 +647,9 @@ cdef class Ideal(object):
     cdef public _groebner_basis
     cdef public _reduced_groebner_basis
     cdef public echelons
-    cdef public matrices
     cdef public select
     #cdef public history
-    
+
     def __init__(self, *args, PolyRing ring=no_ring):
         if ring is no_ring:
             raise ValueError('A PolyRing must be specified.')
@@ -674,7 +659,6 @@ cdef class Ideal(object):
             self.generators = args
         self.ring = ring
         self.echelons = []
-        self.matrices = []
         #self.history = []
         self._groebner_basis = None
         self._reduced_groebner_basis = None
@@ -719,34 +703,62 @@ cdef class Ideal(object):
             if h.is_nonzero:
                 print('[%d] validation failed:'%n, f.head_term, '->', h.head_term)
 
-    def check_groebner(self, G, P):
+    @classmethod
+    def is_groebner(cls, G, P=set(), details=False):
         """
-        For each pair p = Pair(g1, g2) which is not in P, check whether p has a
-        t-representation with respect to G such that t < p.lcm.  Return the set
-        of pairs which sfail this test.
+        For each pair p = Pair(g1, g2) which is not in P, check whether
+        the s-polynomial of p reduces to 0 modulo G.  If details == True,
+        return the set of pairs which fail this test.  Otherwise, return
+        a Boolean value True if G is Groebner, False if not.
 
-        If P is empty and this returns an empty set then G is a groebner basis.
-
-        In general, at the end of the dth iteration of the main loop of the F4
-        algorithm, this should return an empty set when called with G[d] and P[d-1].
-        That is, all pairs in P[d-1] have been processed in constructing G[d].
+        WARNING: This is very innefficient!
         """
         result = set()
         pairs = {Pair(g1, g2) for g1, g2 in combinations(G, 2)} - P
         for p in pairs:
             s = p.spoly()
-            f = self._normalize(s, G)
-            if f.is_nonzero and not f.head_term < p.lcm:
+            f = cls._normalize(s, G)
+            if f.is_nonzero:
                 result.add(p)
-        return result
+        if details:
+            return result
+        else:
+            return len(result) == 0
+
+    @classmethod
+    def _normalize(self, f, G, return_rep=False):
+        """
+        If a term of f is divisible by a head term of g in G, then kill it by
+        subtracting a multiple of g.  Return f when no further simplification is
+        possible.  We assume in this private method that the elements of G are
+        monic, since in our application G will be part of a Gröbner basis.
+        """
+        progress = True
+        rep = []
+        while progress:
+            progress = False
+            # One day we might want to make this faster, without the rep.
+            for m in f.monomials:
+                for i, g in enumerate(G):
+                    if g.head_term.divides(m.term):
+                        m1 = m // g.head_term
+                        f = f - m1*g
+                        rep.append((m1, i))
+                        progress = True
+                        break
+        if return_rep:
+            return f, rep
+        else:
+            return f
+
 
     def echelon_form(self, poly_list):
         """
-        Return a list of Polynomials in echelon form computed from a list of
-        Polynomials.  The ideal generated by the echelon form is equal to that
-        generated by the input polynomials.  To be in echelon form means that
-        each polynomial is monic and that no other polynomial in the list has
-        the same head term.
+        Return a list of Polynomials in (reduced) echelon form computed from a list
+        of Polynomials.  Each polynomial in the output list is a scalar linear
+        combination of polynomials in the input list.  To be in echelon form means
+        that each polynomial is monic (hence non-zero) and that no other
+        polynomial in the list has the same head term.
 
         >>> R = PolyRing('a', 'b', 'c', 'd')
         >>> f1 = Polynomial({(1,0,0,1): 1, (0,1,0,1): 1, (0,0,1,1): 1, (0,0,0,2): 1}, ring=R)
@@ -860,8 +872,7 @@ cdef class Ideal(object):
           * G, a set of polynomials
 
         SIDE EFFECTS:
-          The matrix F obtained by preprocessing is appended to self.matrices and
-          its echelon form :math:`\tilde F is appended to self.echelons
+          The echelon form :math:`\tilde F is appended to self.echelons.
 
         OUTPUT:
           * Returns :math:`\tilde F^plus`, the rows of the echelon form of F
@@ -873,7 +884,6 @@ cdef class Ideal(object):
         """
         F = self.preprocess(L, G)
         # Simplify just iterates through the rows of F, so a list is fine.
-        self.matrices.append(F)
         F_ech = self.echelon_form(F)
         # Simplify looks up echelon rows by their unique head term.  So use a dict.
         self.echelons.append({f.head_term: f for f in F_ech})
@@ -888,9 +898,19 @@ cdef class Ideal(object):
         Return a list of all terms which appear in one of the Polynomials in F, but
         do not appear as a head term of any of those Polynomials.
         """
-        heads = {f.head_term for f in F}
-        terms = set.union(*(set(f.terms()) for f in F))
-        return terms - heads
+        cdef int i
+        cdef int rank = self.ring.rank
+        cdef Term t
+        cdef Polynomial p, f
+        cdef terms, nonheads
+        terms = set()
+        for f in F:
+            for i in range(1, f.c_poly.num_terms):
+                t = Term(ring=self.ring)
+                t.c_term[0] = f.c_poly.terms[i]
+                t.total_degree = Term_total_degree(t.c_term, rank)
+                terms.add(t)
+        return terms - {f.head_term for f in F}
 
     def preprocess(self, L, G):
         """
@@ -899,68 +919,65 @@ cdef class Ideal(object):
         left and right products (momomial times polynomial) for the selected
         pairs.  For each pair, the difference between these two products is the
         s-polynomial.  If the s-polynomial does not reduce to 0 modulo G_n then
-        its reduction must be added to G_n when constructing G_n+1.  This will
-        be handled automatically by the echelon reduction, producing the
-        reduction as a row of the echelon form which has a new head term,
-        provided that each product t*g which is used in reducing a term of the
-        s-polynomial is included in the matrix.  The purpose of the
-        preprocessing step is to add all such multiples of elements of G_n to
-        the matrix.
+        its reduction must be added to G_n when constructing G_n+1.  The
+        reduction will appear as a row of the echelon form , provided that each
+        product t*g which is used in reducing a term of the s-polynomial is
+        included in the matrix.  It can be recognized because its head term will
+        not appear among the head terms of the rows of the initial matrix.  The
+        purpose of the preprocessing step is to add all such multiples of
+        elements of G_n to the matrix.
 
-        Unfortunately, there is a serious error in Faugère's statement of his
-        preprocessing subalgorithm which can lead to incorrect computations.  He
-        says to begin by replacing each product in the list L by its
-        simplification.  Faugère proves in Theorem 2.4 that the final G will be
-        a Groebner basis if, for each distinct g1, g2 in G the s-polynomial of
-        the simplifications g1' and g2' has a t-representation with respect to G
-        such that t < lcm(g1, g2).  So it would seem to be sufficient that the
-        simplifications of the left and right products of each polynomial in L_n
-        reduces to 0 modulo G.  The problem with this argument is the degenerate
-        case where g1 and g2 have the same simplification.  Then the
-        s-polynomial of g1' and g2' is zero, and the zero polynomial does not
-        have t-representation by Definition 2.7. In this case the matrix will
-        have two identical rows, both of which appear in a previous matrix, and
-        the new head term which appears in the s-polynomial of g1 and g2 will be
-        missed.  We observed this happening, and producing a non-Groebner basis,
+        Unfortunately, there is a serious error in the pseudocode for the
+        preprocessing subalgorithm in Faugère's paper, and this error can lead
+        to incorrect computations.  He says to begin the "preprocessing" by
+        replacing each product in the list L by its simplification.  He proves
+        in Theorem 2.4 that the final G will be a Groebner basis if, for each
+        distinct g1, g2 in G, the s-polynomial of their simplifications g1' and
+        g2' has a t-representation with respect to G such that t < lcm(g1, g2).
+        So it would appear to be sufficient that the simplifications of the
+        products in L_n should all reduce to 0 modulo G.  The problem with this
+        reasoning is that it ignores the degenerate case where g1 and g2 have
+        the same simplification.  In that case the s-polynomial of g1' and g2'
+        is zero, and the zero polynomial does not have t-representation by
+        Definition 2.7. So Theorem 2.4 does not apply.  What happens in this
+        case is that the matrix will have two identical rows, both of which
+        appear in a previous matrix, and the new head term which should have
+        appeared in the s-polynomial of g1 and g2 will be missing from the final
+        basis.  We observed this happening, and producing a non-Groebner basis,
         with the Cyclic-4 example when using the Buchberger selection process
         that selects a single pair at random.
 
-        We mention that Faugère omits the proof of correctness of his F4
-        algorithm.  Instead he (mis)states a Theorem from the book by T. Becker
-        and V. Weispfenning and the  mentioned above and says that these
-        two results are used in the proof of correctness.  With that level of
-        detail it is no surprise that degenerate cases will lead to failures.
+        We mention that Faugère's paper omits the proof of correctness of the F4
+        algorithm.  Instead it (mis)states a Theorem from the book by T. Becker
+        and V. Weispfenning and Theorem 2.4, and says that these two results
+        could be used in a proof of correctness, without giving the proof.
 
         This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm.
 
         INPUT:
-          * L, a set of unevaluated products (t, f), t a term and f a polynomial
-          * G, a set of polynomials (to be improved to a Groebner basis.)
+          * L, a list of unevaluated left and right products from a set of pairs
+          * G, a list of polynomials (to eventually be extended to a Groebner basis).
 
         OUTPUT:
-          * F, a set of polynomials such that:
-            o F contains a simplification of t*f for every (t, f) in L
-            o For any non-head term T of a polynomial in F, if T is reducible
-              modulo G then F contains a simplified reducing polynomial for T.
+          * F, a list of polynomials whose echelon form will contain the simplfication
+            of the reduction modulo G of the s-polynomial of each pair, or the
+            reduction of the equivalent s-polynomial of the simplified pair.
         """
         cdef Term t, g_head
         cdef Term t_over_ghead = Term(ring=self.ring)
-        cdef reducer, heads, tails
         cdef int rank = self.ring.rank
-        # Faugère says to start by simplifying the unevaluated products in L.
-        # But doing that leads to wrong answers if two sides of a pair have the
-        # same simplification.  So we don't simplify here.  It would be possible to
-        # use the simplifications when they are different, but in my testing
-        # that was slower.
-        #S = [self.mult(self.simplify(t, f)) for t, f in chain(*L)]
-        S = [self.mult(l) for l in chain(*L)]
+        cdef reducer, tails
+        S = []
+        for p1, p2 in zip(*L):
+             s1, s2 = self.simplify(*p1), self.simplify(*p2)
+             if s1[1].head_term != s2[1].head_term:
+                 S += [self.mult(s1), self.mult(s2)]
+             else:
+                 S += [self.mult(p1), self.mult(p2)]
         #self.history[-1].S = list(S)
-        # Add (simplified) u*g, g in G, which reduce non-head terms of these products.
-        # In Faugère's terminology: heads = Done and tails = T(S) \ Done .
-        # heads, tails = self.heads_and_tails(S)
+        # In Faugère's terminology, tails = T(S) \ Done .
         tails = self.tails(S)
-        while tails:
-            t = tails.pop()
+        for t in tails:
             for g in G:
                 g_head = g.head_term
                 # if HT(g) divides t we add Simplify(t//g_head, g) to S
@@ -968,10 +985,6 @@ cdef class Ideal(object):
                     t_over_ghead.total_degree = Term_total_degree(t_over_ghead.c_term, rank)
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
-                    #heads.add(reducer.head_term)
-                    #tails.union({t for t in reducer.terms()[1:] if t not in heads})
-                    # This seems to be equivalent
-                    tails.union({t for t in reducer.terms()[1:]})
                     break
         return S
 
@@ -982,16 +995,18 @@ cdef class Ideal(object):
         are added to P, then useless pairs are removed.  Elements of G whose
         head term is divisible by h are removed, and finally h is added to G.
 
-        See page 230 of "Gröbner Bases" by T. Becker and V. Weispfenning.
+        Pseudocode for this subalgorithm is given on page 230 of "Gröbner Bases"
+        by T. Becker and V. Weispfenning.
         """
         cdef Term p_lcm, q_lcm
         cdef Term h_head = h.head_term
         C = sorted((Pair(h, g) for g in G), key=lambda p: p.lcm.total_degree, reverse=True)
         D, E, P_new = [], [], []
-        # Discard (h, g) if its lcm is divisible by the lcm of another pair (h, f)
-        # that has not been discarded (unless the head terms of p and h are disjoint;
+        # Discard (h, g) if its lcm is divisible by the lcm of a saved or unseen
+        # pair (h, f), provided that the head terms of f and g are not disjoint;
         # disjoint pairs are removed later in the hope that a disjoint pair will
-        # first show up as minimal and then get deleted for being disjoint).
+        # be used to eliminate other pairs here before it gets deleted for being
+        # disjoint below.
         while C:
             p = C.pop()
             if p.is_disjoint:
@@ -1017,10 +1032,8 @@ cdef class Ideal(object):
                  (p.left_poly not in Eg) or (p.right_poly not in Eg)]
         # Add the pairs in E to P_new.
         P_new += E
-        # This makes for smaller bases but seems to have little effect on
-        # performance, and no effect on correctness.
+        # Remove redundant elements of G.
         G_new = [g for g in G if not h_head.divides(g.head_term)]
-        #G_new = list(G)
         G_new.append(h)
         return G_new, set(P_new)
 
@@ -1075,10 +1088,6 @@ cdef class Ideal(object):
         since 1*f is in F, so u != t and f = p and the algorithm says to
         recursively call simplify(t/u, f) with t/u = t.  We need to handle this
         by stopping the recursion in this case.
-
-        Question: The uniqueness property applies for each F_d separately.  So
-        there may be more than 1 choice of f in F_d such that u*HT(q) = HT(f).
-        Why doesn't this choice matter?  Here we always take the first one.
         """
         cdef Term q_head = q.head_term
         cdef Term f_head
@@ -1094,8 +1103,6 @@ cdef class Ideal(object):
             return result
         for F_ech in self.echelons:
              for f_head in F_ech:
-                 # This loop is run 324,027,643 times for 8_17!
-                 #f_head = f.head_term
                  # We want u, a divisor of t, such that u*HT(q) = HT(f)
                  if (Term_divide(f_head.c_term, q_head.c_term, &u) and
                      Term_divide(t.c_term, &u, t_over_u.c_term)):
@@ -1106,9 +1113,8 @@ cdef class Ideal(object):
                          # t // u == 1.  No further reduction is possible.
                          return (t_over_u, p)
                      elif Term_equals(t.c_term, t_over_u.c_term):
-                         # t // u == t.  Avoid infinite recursion but continue through the
-                         # loop to see if there is something better.  This gives a substantial
-                         # speedup.
+                         # t // u == t.  Avoid infinite recursion, but continue through the
+                         # loop to see if there is something better.
                          result = (t, p)
                          continue
                      else:
@@ -1119,31 +1125,6 @@ cdef class Ideal(object):
 
     def normal_form(self, f):
         return self._normalize(f, self.groebner_basis())
-
-    def _normalize(self, f, G, return_rep=False):
-        """
-        If a term of f is divisible by a head term of g in G, then kill it by
-        subtracting a multiple of g.  Return f when no further simplification is
-        possible.  We assume in this private method that the elements of G are
-        monic, since in our application G will be part of a Gröbner basis.
-        """
-        progress = True
-        rep = []
-        while progress:
-            progress = False
-            # One day we might want to make this faster, without the rep.
-            for m in f.monomials:
-                for i, g in enumerate(G):
-                    if g.head_term.divides(m.term):
-                        m1 = m // g.head_term
-                        f = f - m1*g
-                        rep.append((m1, i))
-                        progress = True
-                        break
-        if return_rep:
-            return f, rep
-        else:
-            return f
 
     def reduced_groebner_basis(self):
         """
