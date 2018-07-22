@@ -767,12 +767,12 @@ cdef class Ideal(object):
         >>> f3 = Polynomial({(1,1,0,0): 1, (0,2,0,0): 1, (0,1,1,0): 1, (0,1,0,1): 1}, ring=R)
         >>> I = Ideal(ring=R)
         >>> I.echelon_form([f1, f2, f3])
-        [a*d + b*d + c*d + d^2, a*b + b*c - b*d - d^2, b^2 + 2*b*d + d^2]
+        [(a*b, a*b + b*c - b*d - d^2), (b^2, b^2 + 2*b*d + d^2), (a*d, a*d + b*d + c*d + d^2)]
         >>> f3 = Polynomial({(1,1,0,0): 2, (0,2,0,0): 4, (0,1,1,0): 4, (0,1,0,1): 1}, ring=R)
         >>> f3
         2*a*b + 4*b^2 + 4*b*c + b*d
         >>> I.echelon_form([f1, f2, f3])
-        [a*d + b*d + c*d + d^2, a*b + b*c - b*d - d^2, b^2 - 1073741823*b*c - 536870911*b*d - 1073741823*d^2]
+        [(a*b, a*b + b*c - b*d - d^2), (b^2, b^2 - 1073741823*b*c - 536870911*b*d - 1073741823*d^2), (a*d, a*d + b*d + c*d + d^2)]
         >>> P = 2**31 - 1
         >>> -2*1073741823 % P
         1
@@ -785,6 +785,8 @@ cdef class Ideal(object):
         cdef int N = len(poly_list)
         cdef int n
         cdef Polynomial p
+        # Sorting by increasing degree speeds up the computation
+        poly_list.sort(key=lambda f: f.head_term)
         polys = <Polynomial_t **>malloc(N*sizeof(Polynomial_t*))
         answer = <Polynomial_t *>malloc(N*sizeof(Polynomial_t))
         for n, p in enumerate(poly_list):
@@ -800,6 +802,7 @@ cdef class Ideal(object):
             if f.is_nonzero:
                 rows.append((f.head_term, f))
         free(answer)
+        # Sort the result by descending head term.
         rows.sort(key=lambda p: p[0], reverse=True)
         return rows
 
@@ -987,8 +990,6 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
-        # Sorting by increasing degree makes a factor of 2 speed difference for Cyclic-7.
-        S.sort(key=lambda f: f.head_term)
         return S
 
     def update(self, G, P, h):
@@ -1108,7 +1109,7 @@ cdef class Ideal(object):
             return result
         for F_ech in self.echelons:
              for f_head, f in F_ech:
-                 # We want u, a divisor of t, such that u*HT(q) = HT(f)
+                 # Search for u, a divisor of t, such that u*HT(q) = HT(f)
                  if (Term_divide(f_head.c_term, q_head.c_term, &u) and
                      Term_divide(t.c_term, &u, t_over_u.c_term)):
                      # Make t_over_u a valid Term by adding its total_degree attribute.
