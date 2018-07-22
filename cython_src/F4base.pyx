@@ -800,6 +800,7 @@ cdef class Ideal(object):
             if f.is_nonzero:
                 rows.append((f.head_term, f))
         free(answer)
+        rows.sort(key=lambda p: p[0], reverse=True)
         return rows
 
     cdef make_monic_generators(self):
