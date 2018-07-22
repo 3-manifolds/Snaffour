@@ -754,10 +754,11 @@ cdef class Ideal(object):
 
     def echelon_form(self, poly_list):
         """
-        Return a list of Polynomials in (reduced) echelon form computed from a list
-        of Polynomials.  Each polynomial in the output list is a scalar linear
-        combination of polynomials in the input list.  To be in echelon form means
-        that each polynomial is monic (hence non-zero) and that no other
+        Return a list of pairs (HT(f), f), where the Polynomials f are the
+        rows of the (reduced) echelon form computed from the input list of
+        Polynomials.  Each polynomial in the output list is a scalar linear
+        combination of polynomials in the input list.  To be in echelon form
+        means that each polynomial is monic (hence non-zero) and that no other
         polynomial in the list has the same head term.
 
         >>> R = PolyRing('a', 'b', 'c', 'd')
@@ -791,15 +792,15 @@ cdef class Ideal(object):
         if not Poly_echelon(polys, answer, self.ring.BIG_PRIME, self.ring.rank, N):
             raise RuntimeError('Out of memory')
         free(polys)
-        result = []
+        rows = []
         for n in range(N):
             f = Polynomial(ring=self.ring)
             f.c_poly = answer[n]
             f.decorate()
             if f.is_nonzero:
-                result.append(f)
+                rows.append((f.head_term, f))
         free(answer)
-        return result
+        return rows
 
     cdef make_monic_generators(self):
         cdef Polynomial f, g
@@ -883,15 +884,14 @@ cdef class Ideal(object):
 
         """
         F = self.preprocess(L, G)
-        # Simplify just iterates through the rows of F, so a list is fine.
         F_ech = self.echelon_form(F)
-        # Simplify looks up echelon rows by their unique head term.  So use a dict.
-        self.echelons.append({f.head_term: f for f in F_ech})
+        # Simplify looks up echelon rows by their unique head term.
+        self.echelons.append(F_ech)
         # Return the set that Faugère calls $\tilde F_d^+$.  It contains only
         # those rows of the echelon form whose head term is new, i.e. not the
         # head term of a polynomial in F.  These get added to G.
         heads = {f.head_term for f in F}
-        return {f for f in F_ech if f.head_term not in heads}
+        return [f for f_head, f in F_ech if f_head not in heads]
 
     cdef tails(self, F):
         """
@@ -986,6 +986,8 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
+        # Sorting by increasing degree makes a factor of 2 speed difference for Cyclic-7.
+        S.sort(key=lambda f: f.head_term)
         return S
 
     def update(self, G, P, h):
@@ -1094,32 +1096,33 @@ cdef class Ideal(object):
         cdef Term t_over_u = Term(ring=self.ring)
         cdef Term_t u
         cdef Term_t uq_head
+        cdef Polynomial f
         cdef int rank = self.ring.rank
         result = (t, q) # The default, if there is nothing better.
         if t.total_degree == 0:
             for F_ech in self.echelons:
-                if q_head in F_ech:
-                    return(t, F_ech[q_head])
+                for f_head, f in F_ech:
+                    if q_head == f_head:
+                        return(t, f)
             return result
         for F_ech in self.echelons:
-             for f_head in F_ech:
+             for f_head, f in F_ech:
                  # We want u, a divisor of t, such that u*HT(q) = HT(f)
                  if (Term_divide(f_head.c_term, q_head.c_term, &u) and
                      Term_divide(t.c_term, &u, t_over_u.c_term)):
                      # Make t_over_u a valid Term by adding its total_degree attribute.
                      t_over_u.total_degree = Term_total_degree(t_over_u.c_term, rank)
-                     p = F_ech[f_head]
                      if Term_equals(t.c_term, &u):
-                         # t // u == 1.  No further reduction is possible.
-                         return (t_over_u, p)
+                         # t // u == 1:  No further reduction is possible.
+                         return (t_over_u, f)
                      elif Term_equals(t.c_term, t_over_u.c_term):
-                         # t // u == t.  Avoid infinite recursion, but continue through the
+                         # t // u == t:  Avoid infinite recursion, but continue through the
                          # loop to see if there is something better.
-                         result = (t, p)
+                         result = (t, f)
                          continue
                      else:
                          # Recursively search for a simpler pair.
-                         return self.simplify(t_over_u, p)
+                         return self.simplify(t_over_u, f)
         # Nothing more left to do.
         return result
 
