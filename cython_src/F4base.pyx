@@ -23,7 +23,7 @@
 #   Author homepage: http://www.unhyperbolic.org/
 
 # change the next line to use cProfile
-#cython: profile=True
+#cython: profile=False
 
 from __future__ import print_function
 from collections import Iterable, Mapping
@@ -892,7 +892,7 @@ cdef class Ideal(object):
         heads = {f.head_term for f in F}
         return [f for f_head, f in F_ech if f_head not in heads]
 
-    cdef tails(self, F):
+    cdef tails(self, list F):
         """
         Return a set containing all terms which appear in one of the Polynomials in
         F, but do not appear as a head term of any of those Polynomials.
@@ -901,7 +901,7 @@ cdef class Ideal(object):
         cdef int rank = self.ring.rank
         cdef Term t
         cdef Polynomial f
-        terms = set()
+        cdef set terms = set()
         for f in F:
             for i in range(1, f.c_poly.num_terms):
                 t = Term(ring=self.ring)
@@ -910,7 +910,7 @@ cdef class Ideal(object):
                 terms.add(t)
         return terms - {f.head_term for f in F}
 
-    def preprocess(self, L, G):
+    def preprocess(self, L, list G):
         """
         This method returns the matrix (as a list of polynomials) which will be
         reduced to echelon form in the main loop.  The input L consists of the
@@ -961,12 +961,16 @@ cdef class Ideal(object):
             of the reduction modulo G of the s-polynomial of each pair, or the
             reduction of the equivalent s-polynomial of the simplified pair.
         """
-        cdef int rank = self.ring.rank
-        cdef Term_t* g_head
         cdef Term t
         cdef Term t_over_ghead = Term(ring=self.ring)
         cdef Polynomial g
-        cdef reducer, tails
+        cdef list S
+        cdef set tails
+        cdef Polynomial reducer
+        cdef Term_t* g_head
+        cdef int rank = self.ring.rank
+        cdef int G_size = len(G)
+        cdef int i
         S = []
         for p1, p2 in zip(*L):
              s1, s2 = self.simplify(*p1), self.simplify(*p2)
@@ -979,7 +983,7 @@ cdef class Ideal(object):
         for t in tails:
             for g in G:
                 g_head = g.c_poly.terms
-                  # if HT(g) divides t we add Simplify(t//g_head, g) to S
+                # if HT(g) divides t we add Simplify(t//g_head, g) to S
                 if Term_divide(t.c_term, g_head, t_over_ghead.c_term):
                     t_over_ghead.total_degree = Term_total_degree(t_over_ghead.c_term, rank)
                     reducer = self.mult(self.simplify(t_over_ghead, g))
