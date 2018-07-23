@@ -994,7 +994,7 @@ cdef class Ideal(object):
 
     def update(self, G, P, h):
         """
-        Use the two "Buchberger Criteria" to update a partial basis and a list of
+        Use the Gebauer-Möller criteria to update a partial basis and a list of
         critical pairs to accommodate a new Polynomial h.  All pairs involving h
         are added to P, then useless pairs are removed.  Elements of G whose
         head term is divisible by h are removed, and finally h is added to G.
