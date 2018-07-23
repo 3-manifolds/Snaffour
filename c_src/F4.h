@@ -53,7 +53,6 @@ typedef struct Term_s {
 } Term_t;
 
 void Term_print(Term_t *t, int rank);
-int  Term_hash(Term_t *t);
 bool Term_equals(Term_t* t, Term_t* s);
 int  Term_total_degree(Term_t *t, int rank);
 bool Term_divides(Term_t* t, Term_t* s);
@@ -62,6 +61,7 @@ void Term_multiply(Term_t *t, Term_t *s, Term_t *answer);
 void Term_lcm(Term_t *t, Term_t *s, Term_t *answer);
 void Term_gcd(Term_t *t, Term_t *s, Term_t *answer);
 int  Term_revlex_diff(Term_t *t, Term_t *s, int rank);
+long Term_hash(Term_t *t);
 
 /** A coefficient in a Polynomial.
  *

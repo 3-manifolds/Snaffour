@@ -23,7 +23,7 @@
 #   Author homepage: http://www.unhyperbolic.org/
 
 # change the next line to use cProfile
-#cython: profile=False
+#cython: profile=True
 
 from __future__ import print_function
 from collections import Iterable, Mapping
@@ -38,7 +38,6 @@ cdef extern from "F4.h":
         pass
     ctypedef Term_s Term_t
     cdef bool Term_equals(Term_t *t, Term_t *s)
-    cdef int  Term_hash(Term_t *t)
     cdef int  Term_total_degree(Term_t *t, int rank)
     cdef bool Term_divides(Term_t *t, Term_t *s)
     cdef bool Term_divide(Term_t *t, Term_t *s, Term_t *answer)
@@ -47,6 +46,7 @@ cdef extern from "F4.h":
     cdef int  Term_lcm(Term_t *t, Term_t *s, Term_t *answer)
     cdef int  Term_revlex_diff(Term_t *t, Term_t *s, int rank)
     cdef void Term_print(Term_t *t)
+    cdef long Term_hash(Term_t *t)
 
     cdef int inverse_mod(int p, int x);
 
@@ -163,7 +163,6 @@ cdef class Term(object):
     True
     """
     cdef Term_t *c_term
-    cdef public _hash
     cdef public int rank
     cdef public int total_degree
     cdef public ring
@@ -186,7 +185,6 @@ cdef class Term(object):
             self.ring = ring
             self.rank = ring.rank
         self.total_degree = 0
-        self._hash = None
         if degree:
             assert self.rank == len(degree) <= 32
             for i in range(self.rank):
@@ -213,10 +211,7 @@ cdef class Term(object):
             return '<1>'
 
     def __hash__(self):
-        # This could be much more efficient!
-        if self._hash is None:
-            self._hash = hash(self.degree)
-        return self._hash
+        return Term_hash(self.c_term)
 
     def __eq__(self, Term other):
         if isinstance(self, Term) and isinstance(other, Term):
@@ -899,14 +894,13 @@ cdef class Ideal(object):
 
     cdef tails(self, F):
         """
-        Return a list of all terms which appear in one of the Polynomials in F, but
-        do not appear as a head term of any of those Polynomials.
+        Return a set containing all terms which appear in one of the Polynomials in
+        F, but do not appear as a head term of any of those Polynomials.
         """
         cdef int i
         cdef int rank = self.ring.rank
         cdef Term t
-        cdef Polynomial p, f
-        cdef terms, nonheads
+        cdef Polynomial f
         terms = set()
         for f in F:
             for i in range(1, f.c_poly.num_terms):
@@ -967,9 +961,11 @@ cdef class Ideal(object):
             of the reduction modulo G of the s-polynomial of each pair, or the
             reduction of the equivalent s-polynomial of the simplified pair.
         """
-        cdef Term t, g_head
-        cdef Term t_over_ghead = Term(ring=self.ring)
         cdef int rank = self.ring.rank
+        cdef Term_t* g_head
+        cdef Term t
+        cdef Term t_over_ghead = Term(ring=self.ring)
+        cdef Polynomial g
         cdef reducer, tails
         S = []
         for p1, p2 in zip(*L):
@@ -979,13 +975,12 @@ cdef class Ideal(object):
              else:
                  S += [self.mult(p1), self.mult(p2)]
         #self.history[-1].S = list(S)
-        # In Faugère's terminology, tails = T(S) \ Done .
         tails = self.tails(S)
         for t in tails:
             for g in G:
-                g_head = g.head_term
-                # if HT(g) divides t we add Simplify(t//g_head, g) to S
-                if Term_divide(t.c_term, g_head.c_term, t_over_ghead.c_term):
+                g_head = g.c_poly.terms
+                  # if HT(g) divides t we add Simplify(t//g_head, g) to S
+                if Term_divide(t.c_term, g_head, t_over_ghead.c_term):
                     t_over_ghead.total_degree = Term_total_degree(t_over_ghead.c_term, rank)
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)

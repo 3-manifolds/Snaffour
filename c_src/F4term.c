@@ -33,13 +33,23 @@ void Term_print(Term_t *t, int rank) {
   printf("] ");
 }
 
-int Term_hash(Term_t *t) {
-  int *w = (int *)&t->degree;
-  int hash = 0;
-  for (int i=0; i<8; i++) {
-    hash ^= w[i];
+
+/* Borrowed from Python's tuple hash function. */
+long Term_hash(Term_t *t)
+{
+  unsigned long* w = (unsigned long*)&t->degree;
+  long x;
+  long mult = 1000003UL  /* 0xf4243 */;
+  x = 0x345678UL;
+  for (int i=0; i<4; i++) {
+        x = (x ^ w[i]) * mult;
+        mult += 82528UL;
   }
-  return hash;
+  x += 97531UL;
+  if (x == (unsigned long)-1) {
+    x = -2;
+  }
+  return x;
 }
 
 /* Does t equal s? */
