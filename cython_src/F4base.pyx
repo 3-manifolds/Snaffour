@@ -223,8 +223,7 @@ cdef class Term(object):
             if self.total_degree < other.total_degree:
                 return True
             if self.total_degree == other.total_degree:
-                return Term_revlex_diff(
-                    self.c_term, other.c_term, self.rank) > 0
+                return Term_revlex_diff(self.c_term, other.c_term, self.rank) > 0
             else:
                 return False
         else:
@@ -244,7 +243,7 @@ cdef class Term(object):
 
     def __mul__(self, other):
         cdef Term left, right, answer
-        if isinstance(self, Term) and isinstance(other, Term) and self.ring == other.ring:
+        if isinstance(self, Term) and isinstance(other, Term) and self.ring is other.ring:
             left, right = self, other
             answer = Term(ring=left.ring)
             Term_multiply(left.c_term, right.c_term, answer.c_term)
@@ -324,15 +323,15 @@ cdef class Monomial(object):
         if isinstance(self, int) and isinstance(other, Monomial):
             coeff = other.ring.reduce_coeff(self*other.coefficient)
             return Monomial(*other.degree, coefficient=coeff, ring=other.ring)
-        elif isinstance(self, Term) and isinstance(other, Monomial) and self.ring == other.ring:
+        elif isinstance(self, Term) and isinstance(other, Monomial) and self.ring is other.ring:
             return Monomial(*((self*other.term).degree),
                             coefficient=other.coefficient,
                             ring=self.ring)
-        elif isinstance(self, Monomial) and isinstance(other, Term) and self.ring == other.ring:
+        elif isinstance(self, Monomial) and isinstance(other, Term) and self.ring is other.ring:
             return Monomial(*((self.term*other).degree),
                             coefficient=self.coefficient,
                             ring=other.ring)
-        elif isinstance(self, Monomial) and isinstance(other, Monomial) and self.ring == other.ring:
+        elif isinstance(self, Monomial) and isinstance(other, Monomial) and self.ring is other.ring:
             return Monomial(*((self.term*other.term).degree),
                             coefficient=self.ring.reduce_coeff(self.coefficient*other.coefficient),
                             ring=self.ring)
@@ -654,10 +653,10 @@ cdef class Ideal(object):
             self.generators = args
         self.ring = ring
         self.echelons = []
-        #self.history = []
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
+        #self.history = []
 
     cdef mult(self, prod):
         """
@@ -884,7 +883,6 @@ cdef class Ideal(object):
         """
         F = self.preprocess(L, G)
         F_ech = self.echelon_form(F)
-        # Simplify looks up echelon rows by their unique head term.
         self.echelons.append(F_ech)
         # Return the set that Faugère calls $\tilde F_d^+$.  It contains only
         # those rows of the echelon form whose head term is new, i.e. not the
@@ -894,8 +892,10 @@ cdef class Ideal(object):
 
     cdef tails(self, list F):
         """
-        Return a set containing all terms which appear in one of the Polynomials in
+        Return a list of all terms which appear in one of the Polynomials in
         F, but do not appear as a head term of any of those Polynomials.
+        The list is sorted by descending degree to make divisibility testing
+        easier.
         """
         cdef int i
         cdef int rank = self.ring.rank
@@ -908,7 +908,7 @@ cdef class Ideal(object):
                 t.c_term[0] = f.c_poly.terms[i]
                 t.total_degree = Term_total_degree(t.c_term, rank)
                 terms.add(t)
-        return terms - {f.head_term for f in F}
+        return sorted(terms - {f.head_term for f in F}, reverse=True)
 
     def preprocess(self, L, list G):
         """
@@ -961,21 +961,24 @@ cdef class Ideal(object):
             of the reduction modulo G of the s-polynomial of each pair, or the
             reduction of the equivalent s-polynomial of the simplified pair.
         """
-        cdef Term t
+        cdef Term t, t1, t2
         cdef Term t_over_ghead = Term(ring=self.ring)
         cdef Polynomial g
         cdef list S
-        cdef set tails
-        cdef Polynomial reducer
+        cdef list tails
+        cdef Polynomial reducer, f1, f2
         cdef Term_t* g_head
         cdef int rank = self.ring.rank
         cdef int G_size = len(G)
-        cdef int i
+        cdef int i, errors
         S = []
+        errors = 0
         for p1, p2 in zip(*L):
-             s1, s2 = self.simplify(*p1), self.simplify(*p2)
-             if s1[1].head_term != s2[1].head_term:
-                 S += [self.mult(s1), self.mult(s2)]
+             t1, f1 = self.simplify(*p1)
+             t2, f2 = self.simplify(*p2)
+             if (not Term_equals(t1.c_term, t2.c_term) or
+                 not Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
+                 S += [self.mult((t1, f1)), self.mult((t2, f2))]
              else:
                  S += [self.mult(p1), self.mult(p2)]
         #self.history[-1].S = list(S)
@@ -1103,7 +1106,7 @@ cdef class Ideal(object):
         if t.total_degree == 0:
             for F_ech in self.echelons:
                 for f_head, f in F_ech:
-                    if q_head == f_head:
+                    if Term_equals(q_head.c_term, f_head.c_term):
                         return(t, f)
             return result
         for F_ech in self.echelons:
