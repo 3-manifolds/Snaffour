@@ -88,8 +88,9 @@ cdef class PolyRing(object):
 
     A PolyRing is required when instantiating a Term, a Monomial, a Polynomial
     or an Ideal.  It specifies the number and names of variables and provides
-    methods for normalizing the coefficients.  The best way to do this is to use
-    the Term, Monomial, Polynomial or Ideal methods of the PolyRing.
+    methods for normalizing the coefficients.  The best way to instantiate a
+    a Term, Monomial, Polynomial or Ideal is to use the eponymous method of
+    a PolyRing.
     """
     cdef public int rank
     cdef public variables
@@ -142,8 +143,9 @@ cdef class Term(object):
     of the powers.  Term degrees are compared using the graded reverse lexicographic
     ordering.
 
-    A Term is modeled as a vector of up to 32 signed chars, stored in an array of
-    two 16-byte vector types suitable for use in a 128-bit SSE2 MMX register.
+    The C structure underlying a Term is a vector of up to 32 signed chars,
+    stored in an array of two 16-byte vector types suitable for use in a 128-bit
+    SSE2 MMX register.
 
     >>> R = PolyRing('x', 'y', 'z')
     >>> t1 = Term(1,2,3,ring=R)
@@ -360,14 +362,15 @@ cdef class Monomial(object):
 
 cdef class Polynomial(object):
     """
-    Base class for polynomials over a PolyRing.  A polynomial is modeled as an array of
-    terms, sorted by decreasing degree, and an array of coefficients.
+    A polynomial over a PolyRing.  The underlying C strucure of a Polynomial is
+    an array of terms, maintained sorted by decreasing degree, and a seperate
+    array of coefficients.  (They are kept separate for alignment reasons.)
 
     Instantiate a polynomial with a mapping from degrees to coefficients or with
     any number of monomial arguments.
 
     Note that the F4 algorithm only requires adding polynomials and multiplying
-    polynomials by monomials or terms.
+    polynomials by scalars or terms.
 
     >>> R = PolyRing('a', 'b', 'c', 'd')
     >>> f = Polynomial({(1,1,0,0): 1, (0,1,1,0): 1, (0,0,1,1): 1, (1,0,0,1): 1}, ring=R)
@@ -398,11 +401,11 @@ cdef class Polynomial(object):
     a*b + b*c - b*d - d^2
     """
     cdef Polynomial_t c_poly
-    cdef _hash
     cdef public PolyRing ring
     cdef public is_nonzero
     cdef public Monomial head_monomial
     cdef public Term head_term
+    cdef public _hash
 
     def __cinit__(self):
         self.c_poly.num_terms = 0
@@ -415,8 +418,8 @@ cdef class Polynomial(object):
 
     def __init__(self, *args, PolyRing ring=no_ring):
         cdef int i, size
-        self._hash = None
         self.ring = ring
+        self._hash = None
         if not args:
             self.is_nonzero = False
             self.head_monomial = self.head_term = None
@@ -458,11 +461,8 @@ cdef class Polynomial(object):
         return self.c_poly.num_terms
 
     def __hash__(self):
-        # This could surely be much more efficient!
         if self._hash is None:
-            self._hash = 0
-            for m in self.monomials:
-                self._hash ^= hash(m)
+            self._hash = hash(self.monomials)
         return self._hash
 
     def __eq__(Polynomial self, Polynomial other):
@@ -552,7 +552,7 @@ cdef class Polynomial(object):
 
     @property
     def monomials(self):
-        return [self.monomial(n) for n in range(self.c_poly.num_terms)]
+        return (self.monomial(n) for n in range(self.c_poly.num_terms))
 
     def coefficient(self, Term t):
         """
@@ -617,7 +617,7 @@ cdef class Pair:
 
     def right_prod(self):
         """
-        Return (t, f) where f is the left poly and HT(t*f) = p.lcm.
+        Return (t, f) where f is the right poly and HT(t*f) = p.lcm.
         """
         return (self.lcm // self.right_head, self.right_poly)
 
@@ -681,21 +681,6 @@ cdef class Ideal(object):
             self.select = self.normal_select
         else:
             raise ValueError('Unknown selector')
-
-    def validate_loop(self, n, G):
-        """
-        For the proof of correctness of F4 to work, it should be true at the end of
-        each iteration of the main loop that for each (t, f) in L, mult(Simplify(t, f))
-        has a t-representation modulo the new G such that t < p.lcm.
-
-        Here we check for something stronger, namely that each mult(Simplify(t,f)) reduces
-        to 0 modulo the new G computed by the end of the loop.
-        """
-        state = self.history[n]
-        for f in state.S:
-            h = self._normalize(f, G)
-            if h.is_nonzero:
-                print('[%d] validation failed:'%n, f.head_term, '->', h.head_term)
 
     @classmethod
     def is_groebner(cls, G, P=set(), details=False):
@@ -927,7 +912,7 @@ cdef class Ideal(object):
 
         Unfortunately, there is a serious error in the pseudocode for the
         preprocessing subalgorithm in Faugère's paper, and this error can lead
-        to incorrect computations.  He says to begin the "preprocessing" by
+        to incorrect computations.  He says to begin the preprocessing by
         replacing each product in the list L by its simplification.  He proves
         in Theorem 2.4 that the final G will be a Groebner basis if, for each
         distinct g1, g2 in G, the s-polynomial of their simplifications g1' and
@@ -950,7 +935,8 @@ cdef class Ideal(object):
         and V. Weispfenning and Theorem 2.4, and says that these two results
         could be used in a proof of correctness, without giving the proof.
 
-        This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm.
+        This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm,
+        modified to correct the error discussed above.
 
         INPUT:
           * L, a list of unevaluated left and right products from a set of pairs
@@ -978,9 +964,9 @@ cdef class Ideal(object):
              t2, f2 = self.simplify(*p2)
              if (not Term_equals(t1.c_term, t2.c_term) or
                  not Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
-                 S += [self.mult((t1, f1)), self.mult((t2, f2))]
+                 S.extend((self.mult((t1, f1)), self.mult((t2, f2))))
              else:
-                 S += [self.mult(p1), self.mult(p2)]
+                 S.extend((self.mult(p1), self.mult(p2)))
         #self.history[-1].S = list(S)
         tails = self.tails(S)
         for t in tails:
@@ -1037,7 +1023,7 @@ cdef class Ideal(object):
         P_new = [p for p in P if (not h_head.divides(p.lcm)) or
                  (p.left_poly not in Eg) or (p.right_poly not in Eg)]
         # Add the pairs in E to P_new.
-        P_new += E
+        P_new.extend(E)
         # Remove redundant elements of G.
         G_new = [g for g in G if not h_head.divides(g.head_term)]
         G_new.append(h)
