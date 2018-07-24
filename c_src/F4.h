@@ -29,7 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/** A Term16_t is an array of 16 unsigned bytes representing exponents.
+/** A Term16_t is an array of 16 chars representing exponents.
  *
  * Assigning the vector_size attribute enables gcc to use the 128-bit SSE
  * MMX registers to do arithmetic operations on all 16 bytes in a single

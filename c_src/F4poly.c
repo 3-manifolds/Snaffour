@@ -23,7 +23,6 @@
  */
 
 #include "F4.h"
-#include <stdlib.h>
 
 /** Struct to hold the result of an extended gcd computation.
  *
@@ -256,7 +255,7 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
    */
   answer->terms = realloc((void*)answer->terms, sizeof(Term_t)*N);
   answer->coefficients = realloc((void*)answer->coefficients, sizeof(coeff_t)*N);
-  if (N != 0 && (answer->terms == NULL || answer->coefficients == NULL)) {
+  if ((answer->terms == NULL || answer->coefficients == NULL) && N != 0) {
       Poly_free(answer);
       return false;
     }
