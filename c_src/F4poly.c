@@ -469,6 +469,50 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, int g_coeff, int pri
   return true;
 }
 
+
+/*
+ * Sort an array of type Polynomial_t, in place, by head term.  Zero
+ * polynomials go to the end;
+ *
+ */
+
+static int compare_heads(const void* p1, const void* p2) {
+  Polynomial_t* P1 = (Polynomial_t*)p1;
+  Polynomial_t* P2 = (Polynomial_t*)p2;
+  Term_t *head1 = P1->terms, *head2 = P2->terms;
+  int td1, td2, td_cmp;
+  if (P1->num_terms == 0) {
+    return 1;
+  }
+  if (P2->num_terms == 0) {
+    return -1;
+  }
+  td1 = Term_total_degree(head1, P1->rank);
+  td2 = Term_total_degree(head2, P2->rank);
+  td_cmp = td1 - td2;
+  return td_cmp == 0 ? Term_revlex_diff(head2, head1, P1->rank) : td_cmp;
+}
+
+static int compare_heads_dec(const void* p1, const void* p2) {
+  Polynomial_t* P1 = (Polynomial_t*)p1;
+  Polynomial_t* P2 = (Polynomial_t*)p2;
+  if (P1->num_terms == 0) {
+    return 1;
+  }
+  if (P2->num_terms == 0) {
+    return -1;
+  }
+  return -compare_heads(p1, p2);
+}
+
+void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
+  if (increasing) {
+    qsort(P, num_polys, sizeof(Polynomial_t), compare_heads);
+  } else {
+    qsort(P, num_polys, sizeof(Polynomial_t), compare_heads_dec);
+  }
+}
+
 /** Echelon Form
  *
  * Input an array P of Polynomial pointers, and an array answer of unitialized
@@ -477,6 +521,7 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, int g_coeff, int pri
  * array.  Then row operations are performed on the answer array until each
  * leading term occurs in exactly one row.
  */
+    
 
 bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
                   size_t num_rows) {
@@ -489,6 +534,12 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
       return false;
     }
   }
+  /*
+   * The best pivoting strategy I have found is to sort by increasing head term
+   * once, at the beginning.  Doing subsequent sorts seems to cost more than it
+   * saves.
+   */
+  qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads);
   for (i = 0; i < num_rows; i++) {
     row_i = answer + i;
     if (row_i->num_terms == 0) continue;
@@ -507,3 +558,4 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
   }
   return true;
 }
+

@@ -47,7 +47,9 @@ cdef extern from "F4.h":
     cdef int  Term_revlex_diff(Term_t *t, Term_t *s, int rank)
     cdef void Term_print(Term_t *t)
     cdef long Term_hash(Term_t *t)
-
+    cdef bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
+                         Term_t** answer, int* answer_size, int rank)
+    
     cdef int inverse_mod(int p, int x);
 
     cdef struct coeff_s:
@@ -76,6 +78,7 @@ cdef extern from "F4.h":
                            size_t num_rows)
     cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
     cdef bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank)
+    cdef void Poly_sort(Polynomial_t *P, int num_polys, bool increasing)
 
 cdef extern from "Python.h":
     pass
@@ -629,10 +632,9 @@ cdef class F4State(object):
     cdef public P
     cdef public Sel
     cdef public S
-    cdef public G_x
 
     def __init__(self, G, P, Sel):
-        self.G, self.P, self.Sel, self.S, self.G_x = list(G), set(P), set(Sel), [], set()
+        self.G, self.P, self.Sel, self.S = list(G), set(P), set(Sel), []
 
 cdef class Ideal(object):
     cdef public generators
@@ -642,7 +644,7 @@ cdef class Ideal(object):
     cdef public _reduced_groebner_basis
     cdef public echelons
     cdef public select
-    #cdef public history
+#    cdef public history
 
     def __init__(self, *args, PolyRing ring=no_ring):
         if ring is no_ring:
@@ -656,7 +658,7 @@ cdef class Ideal(object):
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
-        #self.history = []
+#        self.history = []
 
     cdef mult(self, prod):
         """
@@ -764,8 +766,6 @@ cdef class Ideal(object):
         cdef int N = len(poly_list)
         cdef int n
         cdef Polynomial p
-        # Sorting by increasing degree speeds up the computation
-        poly_list.sort(key=lambda f: f.head_term)
         polys = <Polynomial_t **>malloc(N*sizeof(Polynomial_t*))
         answer = <Polynomial_t *>malloc(N*sizeof(Polynomial_t))
         for n, p in enumerate(poly_list):
@@ -805,12 +805,12 @@ cdef class Ideal(object):
             return self._groebner_basis
         self.make_monic_generators()
         G, P = [], set()
-        #self.history.append(F4State(G, P, set()))
+#        self.history.append(F4State(G, P, set()))
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
             Sel = self.select(P)
-            #self.history.append(F4State(G, P, Sel))
+#            self.history.append(F4State(G, P, Sel))
             L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
             tilde_F_plus = self.reduce(L, G)
             P = P - Sel
@@ -852,7 +852,7 @@ cdef class Ideal(object):
         This is the Reduction subalgorithm of Faugère's F4.
 
         INPUT:
-          * L =(L1, L2), each a list of pairs (t, f), t a term and f a polynomial
+          * L = (L1, L2), each a list of pairs (t, f), t a term and f a polynomial
           * G, a set of polynomials
 
         SIDE EFFECTS:
@@ -874,6 +874,24 @@ cdef class Ideal(object):
         # head term of a polynomial in F.  These get added to G.
         heads = {f.head_term for f in F}
         return [f for f_head, f in F_ech if f_head not in heads]
+
+    def term_list(self, Polynomial P1, Polynomial P2):
+        cdef Term_t *terms
+        cdef int i, num_terms
+        cdef int rank = self.ring.rank
+        cdef Term t
+        if not Term_merge(P1.c_poly.terms, P2.c_poly.terms,
+                          P1.c_poly.num_terms, P2.c_poly.num_terms,
+                          &terms, &num_terms, rank):
+            raise RuntimeError('Out of memory!')
+        result = []
+        for i in range(num_terms):
+            t = Term(ring=self.ring)
+            t.c_term[0] = terms[i]
+            t.total_degree = Term_total_degree(t.c_term, rank)
+            result.append(t)
+        free(terms)
+        return result
 
     cdef tails(self, list F):
         """
@@ -967,7 +985,6 @@ cdef class Ideal(object):
                  S.extend((self.mult((t1, f1)), self.mult((t2, f2))))
              else:
                  S.extend((self.mult(p1), self.mult(p2)))
-        #self.history[-1].S = list(S)
         tails = self.tails(S)
         for t in tails:
             for g in G:
@@ -978,6 +995,7 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
+#        self.history[-1].S = list(S)
         return S
 
     def update(self, G, P, h):

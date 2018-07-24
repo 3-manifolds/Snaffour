@@ -157,7 +157,9 @@ bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
                        Term_t** answer, int* answer_size, int rank) {
   int size = s_size + t_size, p = 0, q = 0, N = 0, s_td, t_td;
   Term_t* merged = (Term_t*)malloc(sizeof(Term_t)*size);
-  if (*answer == NULL) {
+  if (merged == NULL) {
+    *answer_size = 0;
+    *answer = NULL;
     return false;
   }
   while (p < s_size && q < t_size) {
@@ -178,17 +180,13 @@ bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
     }
   }
   /* At most one of these two loops will be non-trivial. */
-  for (; q < s_size; q++, N++) {
-    merged[N] = s[q];
+  while (p < s_size) {
+    merged[N++] = s[p++];
   }
-  for (; p < t_size; p++, N++) {
-    merged[N] = t[p];
+  while (q < t_size) {
+    merged[N++] = t[q++];
   }
   *answer_size = N;
-  *answer = realloc((void*)merged, sizeof(Term_t)*N);
-  if (*answer == NULL && N != 0) {
-    *answer_size = 0;
-    return false;
-  }
+  *answer = merged;
   return true;
 }

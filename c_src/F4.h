@@ -63,6 +63,8 @@ void Term_lcm(Term_t *t, Term_t *s, Term_t *answer);
 void Term_gcd(Term_t *t, Term_t *s, Term_t *answer);
 int  Term_revlex_diff(Term_t *t, Term_t *s, int rank);
 long Term_hash(Term_t *t);
+bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
+		Term_t** answer, int* answer_size, int rank);
 
 /** A coefficient in a Polynomial.
  *
@@ -132,6 +134,7 @@ bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank)
 bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank, size_t num_rows);
 bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);
+void Poly_sort(Polynomial_t *P, int num_polys, bool increasing);
 
 #define F_FOUR_H
 #endif
