@@ -130,7 +130,8 @@ void Term_gcd(Term_t *t, Term_t *s, Term_t *answer) {
 
 /*
  * Return the difference T[i] - S[i] where i is the first term where they differ,
- * or return 0 if the terms are equal.  Thus a positive value means that t < s.
+ * or return 0 if the terms are equal.  Thus a positive value means that t < s,
+ * since the lex order is *reversed* in grevlex!
  */
 int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
   int i = rank;
@@ -143,4 +144,51 @@ int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
     return 0;  /* t == s */
   }
   return T[i] - S[i];
+}
+
+/* Merge two strictly decreasing arrays of Terms
+ *
+ * Duplicates are removed and the resulting strictly decreasing list is stored
+ * in answer.  Memory will be allocated for the answer. The caller is responsible
+ * for freeing the memory.
+ */
+
+bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
+                       Term_t** answer, int* answer_size, int rank) {
+  int size = s_size + t_size, p = 0, q = 0, N = 0, s_td, t_td;
+  Term_t* merged = (Term_t*)malloc(sizeof(Term_t)*size);
+  if (*answer == NULL) {
+    return false;
+  }
+  while (p < s_size && q < t_size) {
+    s_td = Term_total_degree(s + p, rank);
+    t_td = Term_total_degree(t + q, rank);
+    int td_cmp = s_td - t_td;
+    int revlex_cmp = td_cmp == 0 ? Term_revlex_diff(t + q, s + p, rank) : 0;
+    if (td_cmp > 0 || revlex_cmp > 0) {
+      /* s[p] > t[q] */
+      merged[N++] = s[p++];
+    } else if (td_cmp < 0 || revlex_cmp < 0) {
+      /* t[q] > s[p]*/
+      merged[N++] = t[q++];
+    } else {
+      /* s[p] == t[q] */
+      merged[N++] = s[p++];
+      q++;
+    }
+  }
+  /* At most one of these two loops will be non-trivial. */
+  for (; q < s_size; q++, N++) {
+    merged[N] = s[q];
+  }
+  for (; p < t_size; p++, N++) {
+    merged[N] = t[p];
+  }
+  *answer_size = N;
+  *answer = realloc((void*)merged, sizeof(Term_t)*N);
+  if (*answer == NULL && N != 0) {
+    *answer_size = 0;
+    return false;
+  }
+  return true;
 }
