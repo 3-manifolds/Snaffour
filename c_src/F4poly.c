@@ -556,6 +556,10 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
       }
     }
   }
+  /*
+   * While we are here in C land, lets sort the result by decreasing head term.
+   */
+  qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads_dec);
   return true;
 }
 

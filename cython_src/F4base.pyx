@@ -23,7 +23,7 @@
 #   Author homepage: http://www.unhyperbolic.org/
 
 # change the next line to use cProfile
-#cython: profile=False
+#cython: profile=True
 
 from __future__ import print_function
 from collections import Iterable, Mapping
@@ -49,7 +49,7 @@ cdef extern from "F4.h":
     cdef long Term_hash(Term_t *t)
     cdef bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
                          Term_t** answer, int* answer_size, int rank)
-    
+
     cdef int inverse_mod(int p, int x);
 
     cdef struct coeff_s:
@@ -737,12 +737,12 @@ cdef class Ideal(object):
 
     def echelon_form(self, poly_list):
         """
-        Return a list of pairs (HT(f), f), where the Polynomials f are the
-        rows of the (reduced) echelon form computed from the input list of
-        Polynomials.  Each polynomial in the output list is a scalar linear
-        combination of polynomials in the input list.  To be in echelon form
-        means that each polynomial is monic (hence non-zero) and that no other
-        polynomial in the list has the same head term.
+        Return a list of Polynomials which correspond to the rows of the (reduced)
+        echelon form computed from the input list of Polynomials.  Each
+        polynomial in the output list is a scalar linear combination of
+        polynomials in the input list.  To be in echelon form means that each
+        polynomial is monic (hence non-zero) and that no other polynomial in the
+        list has the same head term.
 
         >>> R = PolyRing('a', 'b', 'c', 'd')
         >>> f1 = Polynomial({(1,0,0,1): 1, (0,1,0,1): 1, (0,0,1,1): 1, (0,0,0,2): 1}, ring=R)
@@ -781,10 +781,8 @@ cdef class Ideal(object):
             f.c_poly = answer[n]
             f.decorate()
             if f.is_nonzero:
-                rows.append((f.head_term, f))
+                rows.append(f)
         free(answer)
-        # Sort the result by descending head term.
-        rows.sort(key=lambda p: p[0], reverse=True)
         return rows
 
     cdef make_monic_generators(self):
@@ -871,13 +869,21 @@ cdef class Ideal(object):
         F = self.preprocess(L, G)
         F_ech = self.echelon_form(F)
         self.echelons.append(F_ech)
-        # Return the set that Faugère calls $\tilde F_d^+$.  It contains only
-        # those rows of the echelon form whose head term is new, i.e. not the
-        # head term of a polynomial in F.  These get added to G.
         heads = {f.head_term for f in F}
-        return [f for f_head, f in F_ech if f_head not in heads]
+        return [f for f in F_ech if f.head_term not in heads]
 
-    cdef term_list(self, list poly_list):
+    def terms(self, list polys):
+        """
+        Return a list of all terms that appear in the input list of Polynomials.
+        The terms will be sorted by descending degree.
+        """
+        for P in polys:
+            assert isinstance(P, Polynomial)
+            assert P.ring is self.ring, (
+                'The Polynomials must belong to the ring containing the ideal.')
+        return self.term_list(polys)
+
+    cdef term_list(self, poly_list):
         cdef Term_t *terms
         cdef int i, num_terms
         cdef int rank = self.ring.rank
@@ -886,7 +892,6 @@ cdef class Ideal(object):
         cdef Polynomial_t* polys = <Polynomial_t*>malloc(
             len(poly_list)*sizeof(Polynomial_t))
         for i, P in enumerate(poly_list):
-            assert P.ring is self.ring, 'The rings must be the same.'
             polys[i] = P.c_poly
         if not Poly_terms(polys, len(poly_list), &terms, &num_terms, rank):
             raise RuntimeError('Out of memory!')
@@ -909,7 +914,7 @@ cdef class Ideal(object):
         """
         heads = {f.head_term for f in F}
         return [t for t in self.term_list(F) if t not in heads]
-                
+
     def preprocess(self, L, list G):
         """
         This method returns the matrix (as a list of polynomials) which will be
@@ -975,8 +980,8 @@ cdef class Ideal(object):
         S = []
         errors = 0
         for p1, p2 in zip(*L):
-             t1, f1 = self.simplify(*p1)
-             t2, f2 = self.simplify(*p2)
+             t1, f1 = self.simplify(p1[0], p1[1])
+             t2, f2 = self.simplify(p2[0], p2[1])
              if (not Term_equals(t1.c_term, t2.c_term) or
                  not Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
                  S.extend((self.mult((t1, f1)), self.mult((t2, f2))))
@@ -1097,23 +1102,25 @@ cdef class Ideal(object):
         by stopping the recursion in this case.
         """
         cdef Term q_head = q.head_term
-        cdef Term f_head
         cdef Term t_over_u = Term(ring=self.ring)
         cdef Term_t u
         cdef Term_t uq_head
+        cdef Term_t *f_head
         cdef Polynomial f
         cdef int rank = self.ring.rank
         result = (t, q) # The default, if there is nothing better.
         if t.total_degree == 0:
             for F_ech in self.echelons:
-                for f_head, f in F_ech:
-                    if Term_equals(q_head.c_term, f_head.c_term):
+                for f in F_ech:
+                    f_head = f.c_poly.terms
+                    if Term_equals(q_head.c_term, f_head):
                         return(t, f)
             return result
         for F_ech in self.echelons:
-             for f_head, f in F_ech:
+             for f in F_ech:
+                 f_head = f.c_poly.terms
                  # Search for u, a divisor of t, such that u*HT(q) = HT(f)
-                 if (Term_divide(f_head.c_term, q_head.c_term, &u) and
+                 if (Term_divide(f_head, q_head.c_term, &u) and
                      Term_divide(t.c_term, &u, t_over_u.c_term)):
                      # Make t_over_u a valid Term by adding its total_degree attribute.
                      t_over_u.total_degree = Term_total_degree(t_over_u.c_term, rank)
