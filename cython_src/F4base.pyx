@@ -79,6 +79,8 @@ cdef extern from "F4.h":
     cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
     cdef bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank)
     cdef void Poly_sort(Polynomial_t *P, int num_polys, bool increasing)
+    cdef bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size,
+                         int rank);
 
 cdef extern from "Python.h":
     pass
@@ -875,14 +877,18 @@ cdef class Ideal(object):
         heads = {f.head_term for f in F}
         return [f for f_head, f in F_ech if f_head not in heads]
 
-    def term_list(self, Polynomial P1, Polynomial P2):
+    cdef term_list(self, list poly_list):
         cdef Term_t *terms
         cdef int i, num_terms
         cdef int rank = self.ring.rank
         cdef Term t
-        if not Term_merge(P1.c_poly.terms, P2.c_poly.terms,
-                          P1.c_poly.num_terms, P2.c_poly.num_terms,
-                          &terms, &num_terms, rank):
+        cdef Polynomial P
+        cdef Polynomial_t* polys = <Polynomial_t*>malloc(
+            len(poly_list)*sizeof(Polynomial_t))
+        for i, P in enumerate(poly_list):
+            assert P.ring is self.ring, 'The rings must be the same.'
+            polys[i] = P.c_poly
+        if not Poly_terms(polys, len(poly_list), &terms, &num_terms, rank):
             raise RuntimeError('Out of memory!')
         result = []
         for i in range(num_terms):
@@ -891,6 +897,7 @@ cdef class Ideal(object):
             t.total_degree = Term_total_degree(t.c_term, rank)
             result.append(t)
         free(terms)
+        free(polys)
         return result
 
     cdef tails(self, list F):
@@ -900,19 +907,9 @@ cdef class Ideal(object):
         The list is sorted by descending degree to make divisibility testing
         easier.
         """
-        cdef int i
-        cdef int rank = self.ring.rank
-        cdef Term t
-        cdef Polynomial f
-        cdef set terms = set()
-        for f in F:
-            for i in range(1, f.c_poly.num_terms):
-                t = Term(ring=self.ring)
-                t.c_term[0] = f.c_poly.terms[i]
-                t.total_degree = Term_total_degree(t.c_term, rank)
-                terms.add(t)
-        return sorted(terms - {f.head_term for f in F}, reverse=True)
-
+        heads = {f.head_term for f in F}
+        return [t for t in self.term_list(F) if t not in heads]
+                
     def preprocess(self, L, list G):
         """
         This method returns the matrix (as a list of polynomials) which will be
@@ -941,16 +938,16 @@ cdef class Ideal(object):
         the same simplification.  In that case the s-polynomial of g1' and g2'
         is zero, and the zero polynomial does not have t-representation by
         Definition 2.7. So Theorem 2.4 does not apply.  What happens in this
-        case is that the matrix will have two identical rows, both of which
-        appear in a previous matrix, and the new head term which should have
-        appeared in the s-polynomial of g1 and g2 will be missing from the final
-        basis.  We observed this happening, and producing a non-Groebner basis,
-        with the Cyclic-4 example when using the Buchberger selection process
-        that selects a single pair at random.
+        case is that the matrix will have two identical rows, which appeared in
+        a previous matrix, and the new head term which should have appeared in
+        the s-polynomial of g1 and g2 will be missing from the final basis.  We
+        observed this happening, and producing a non-Groebner basis, with the
+        Cyclic-4 example when using the Buchberger selection process that
+        selects a single pair at random.
 
         We mention that Faugère's paper omits the proof of correctness of the F4
         algorithm.  Instead it (mis)states a Theorem from the book by T. Becker
-        and V. Weispfenning and Theorem 2.4, and says that these two results
+        and V. Weispfenning along with Theorem 2.4, and says that these two results
         could be used in a proof of correctness, without giving the proof.
 
         This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm,

@@ -559,3 +559,40 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
   return true;
 }
 
+/*
+ * Allocate an array and fill it with all of the distinct terms, in descending
+ * order, that appear in the input array of Polynomials.
+ */
+
+bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size,
+		int rank) {
+  if (num_polys == 1) {
+    *answer = (Term_t*)malloc(P[0].num_terms*sizeof(Term_t));
+    if (*answer == NULL) {
+      return false;
+    }
+    memcpy((void*)*answer, P[0].terms, P[0].num_terms*sizeof(Term_t));
+    *answer_size = P[0].num_terms;
+    return true;
+  }
+  if (num_polys == 2) {
+      return Term_merge(P[0].terms, P[1].terms, P[0].num_terms, P[1].num_terms,
+			answer, answer_size, rank);
+  }
+  int left = num_polys / 2, right = num_polys - left;
+  Term_t *left_answer, *right_answer;
+  int left_size, right_size;
+  bool result;
+  if (! Poly_terms(P, left, &left_answer, &left_size, rank)) {
+    return false;
+  }
+  if (! Poly_terms(P + left, right, &right_answer, &right_size, rank)) {
+    free(left_answer);
+    return false;
+  }
+  result = Term_merge(left_answer, right_answer, left_size, right_size,
+  		      answer, answer_size, rank);
+  free(left_answer);
+  free(right_answer);
+  return result;
+}

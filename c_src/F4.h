@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 /** A Term16_t is an array of 16 chars representing exponents.
  *
@@ -39,7 +40,7 @@
 
 typedef char Term16_t __attribute__ ((vector_size (16)));
 
-/** A Term
+/** Terms
  *
  * We use two Term16_t vectors to allow up to 32 variables.  For computing
  * Ptolemy varieties, 16 variables would not be enough.  The code uses a
@@ -66,7 +67,7 @@ long Term_hash(Term_t *t);
 bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
 		Term_t** answer, int* answer_size, int rank);
 
-/** A coefficient in a Polynomial.
+/** Coefficients in a Polynomial.
  *
  * The coefficient also stores the total degree of its term because the 32 byte
  * Terms must be in 16-byte aligned memory.  It would be a waste to use 16 bytes
@@ -83,7 +84,7 @@ typedef struct coeff_s {
 
 int inverse_mod(int p, int x);
 
-/** A Polynomial
+/** Polynomials
  * 
  * We use separate arrays for terms and coefficients to avoid wasting memory
  * because the terms must be aligned to 16 bytes, while the coefficients are
@@ -113,6 +114,7 @@ int inverse_mod(int p, int x);
  * library.  (The Cython __cinit__ and __dealloc__ methods call Poly_alloc
  * and Poly_free.)
  */
+
 typedef struct Polynomial_s {
   int num_terms;
   int rank;
@@ -135,6 +137,7 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank, s
 bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);
 void Poly_sort(Polynomial_t *P, int num_polys, bool increasing);
+bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size, int rank);
 
 #define F_FOUR_H
 #endif
