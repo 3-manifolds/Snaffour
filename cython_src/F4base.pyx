@@ -626,6 +626,57 @@ cdef class Pair:
         """
         return (self.lcm // self.right_head, self.right_poly)
 
+cdef class PolyMatrix(object):
+    """
+    A PolyMatrix is initialized with a list of polynomials.  During initialization
+    it computes and store the reduced echelon form in a way that will make it fast
+    to access this data.  It does not hold references to the input polynomials.
+    """
+    cdef public PolyRing ring
+    cdef public int num_rows
+    cdef public tuple rows     # A tuple of Polynomials corresponding to the rows.
+    cdef Polynomial_t** c_rows # The underlying C structs accessible as an array
+    cdef Term_t** c_heads      # The head terms accessible as an array
+
+    def __cinit__(self, list poly_list):
+        self.c_rows = <Polynomial_t**>malloc(self.num_rows*sizeof(Polynomial_t*))
+        self.c_heads = <Term_t**>malloc(self.num_rows*sizeof(Term_t*))
+
+    def __dealloc__(self):
+        free(self.c_rows)
+        free(self.c_heads)
+
+    def __init__(self, poly_list):
+        cdef Polynomial_t** polys
+        cdef Term_t** terms
+        cdef Polynomial_t* answer
+        cdef int N = len(poly_list)
+        cdef int n
+        cdef Polynomial p
+        polys = <Polynomial_t **>malloc(N*sizeof(Polynomial_t*))
+        answer = <Polynomial_t *>malloc(N*sizeof(Polynomial_t))
+        assert isinstance(poly_list[0], Polynomial)
+        self.ring = poly_list[0].ring
+        for n, p in enumerate(poly_list):
+            assert p.ring is self.ring
+            polys[n] = &p.c_poly
+        if not Poly_echelon(polys, answer, self.ring.BIG_PRIME, self.ring.rank, N):
+            raise RuntimeError('Out of memory')
+        free(polys)
+        rows = []
+        for n in range(N):
+            f = Polynomial(ring=self.ring)
+            f.c_poly = answer[n]
+            f.decorate()
+            if f.is_nonzero:
+                rows.append(f)
+        free(answer)
+        self.rows = tuple(rows)
+        self.num_rows = len(self.rows)
+        for n, p in enumerate(self.rows):
+            self.c_rows[n] = &p.c_poly
+            self.c_heads[n] = p.c_poly.terms
+
 cdef class F4State(object):
     """
     Records the state of the F4 algorithm at the beginning of each loop.
@@ -646,7 +697,7 @@ cdef class Ideal(object):
     cdef public _reduced_groebner_basis
     cdef public echelons
     cdef public select
-#    cdef public history
+    cdef public history
 
     def __init__(self, *args, PolyRing ring=no_ring):
         if ring is no_ring:
@@ -660,7 +711,7 @@ cdef class Ideal(object):
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
-#        self.history = []
+        self.history = []
 
     cdef mult(self, prod):
         """
@@ -750,12 +801,12 @@ cdef class Ideal(object):
         >>> f3 = Polynomial({(1,1,0,0): 1, (0,2,0,0): 1, (0,1,1,0): 1, (0,1,0,1): 1}, ring=R)
         >>> I = Ideal(ring=R)
         >>> I.echelon_form([f1, f2, f3])
-        [(a*b, a*b + b*c - b*d - d^2), (b^2, b^2 + 2*b*d + d^2), (a*d, a*d + b*d + c*d + d^2)]
+        [a*b + b*c - b*d - d^2, b^2 + 2*b*d + d^2, a*d + b*d + c*d + d^2]
         >>> f3 = Polynomial({(1,1,0,0): 2, (0,2,0,0): 4, (0,1,1,0): 4, (0,1,0,1): 1}, ring=R)
         >>> f3
         2*a*b + 4*b^2 + 4*b*c + b*d
         >>> I.echelon_form([f1, f2, f3])
-        [(a*b, a*b + b*c - b*d - d^2), (b^2, b^2 - 1073741823*b*c - 536870911*b*d - 1073741823*d^2), (a*d, a*d + b*d + c*d + d^2)]
+        [a*b + b*c - b*d - d^2, b^2 - 1073741823*b*c - 536870911*b*d - 1073741823*d^2, a*d + b*d + c*d + d^2]
         >>> P = 2**31 - 1
         >>> -2*1073741823 % P
         1
@@ -805,12 +856,12 @@ cdef class Ideal(object):
             return self._groebner_basis
         self.make_monic_generators()
         G, P = [], set()
-#        self.history.append(F4State(G, P, set()))
+        self.history.append(F4State(G, P, set()))
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
             Sel = self.select(P)
-#            self.history.append(F4State(G, P, Sel))
+            self.history.append(F4State(G, P, Sel))
             L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
             tilde_F_plus = self.reduce(L, G)
             P = P - Sel
@@ -930,7 +981,7 @@ cdef class Ideal(object):
         purpose of the preprocessing step is to add all such multiples of
         elements of G_n to the matrix.
 
-        Unfortunately, there is a serious error in the pseudocode for the
+        There is a serious, but easily fixable error in the pseudocode for the
         preprocessing subalgorithm in Faugère's paper, and this error can lead
         to incorrect computations.  He says to begin the preprocessing by
         replacing each product in the list L by its simplification.  He proves
@@ -947,13 +998,14 @@ cdef class Ideal(object):
         a previous matrix, and the new head term which should have appeared in
         the s-polynomial of g1 and g2 will be missing from the final basis.  We
         observed this happening, and producing a non-Groebner basis, with the
-        Cyclic-4 example when using the Buchberger selection process that
-        selects a single pair at random.
+        Cyclic-4 example when using the identity selection process that selects
+        all pairs, as well as in some of the Buchberger selection processes that
+        select one pair.
 
         We mention that Faugère's paper omits the proof of correctness of the F4
         algorithm.  Instead it (mis)states a Theorem from the book by T. Becker
         and V. Weispfenning along with Theorem 2.4, and says that these two results
-        could be used in a proof of correctness, without giving the proof.
+        could be used in a proof of correctness, without actually giving the proof.
 
         This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm,
         modified to correct the error discussed above.
@@ -997,7 +1049,7 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
-#        self.history[-1].S = list(S)
+        self.history[-1].S = list(S)
         return S
 
     def update(self, G, P, h):
@@ -1035,10 +1087,10 @@ cdef class Ideal(object):
                         break
                 if not useless:
                     D.append(p)
-        # Now discard pairs with disjoint head terms.  (1st Criterion)
+        # Now discard pairs with disjoint head terms.
         E = [p for p in D if not p.is_disjoint]
         Eg = {p.right_poly for p in E}
-        # Add pairs (f, g) in P to P_new if they do not satiisfy the 2nd Criterion:
+        # Add pairs (f, g) in P to P_new if they do not satiisfy:
         #   * HT(h) divides lcm(f, g) and (h, f) and (h, g) are both in E.
         P_new = [p for p in P if (not h_head.divides(p.lcm)) or
                  (p.left_poly not in Eg) or (p.right_poly not in Eg)]
@@ -1107,6 +1159,8 @@ cdef class Ideal(object):
         cdef Term_t uq_head
         cdef Term_t *f_head
         cdef Polynomial f
+        cdef F_ech
+        cdef int i
         cdef int rank = self.ring.rank
         result = (t, q) # The default, if there is nothing better.
         if t.total_degree == 0:
@@ -1117,24 +1171,24 @@ cdef class Ideal(object):
                         return(t, f)
             return result
         for F_ech in self.echelons:
-             for f in F_ech:
-                 f_head = f.c_poly.terms
-                 # Search for u, a divisor of t, such that u*HT(q) = HT(f)
-                 if (Term_divide(f_head, q_head.c_term, &u) and
-                     Term_divide(t.c_term, &u, t_over_u.c_term)):
-                     # Make t_over_u a valid Term by adding its total_degree attribute.
-                     t_over_u.total_degree = Term_total_degree(t_over_u.c_term, rank)
-                     if Term_equals(t.c_term, &u):
-                         # t // u == 1:  No further reduction is possible.
-                         return (t_over_u, f)
-                     elif Term_equals(t.c_term, t_over_u.c_term):
-                         # t // u == t:  Avoid infinite recursion, but continue through the
-                         # loop to see if there is something better.
-                         result = (t, f)
-                         continue
-                     else:
-                         # Recursively search for a simpler pair.
-                         return self.simplify(t_over_u, f)
+            for f in F_ech:
+                f_head = f.c_poly.terms
+            # Search for u, a divisor of t, such that u*HT(q) = HT(f)
+                if (Term_divide(f_head, q_head.c_term, &u) and
+                    Term_divide(t.c_term, &u, t_over_u.c_term)):
+                    # Make t_over_u a valid Term by adding its total_degree attribute.
+                    t_over_u.total_degree = Term_total_degree(t_over_u.c_term, rank)
+                    if Term_equals(t.c_term, &u):
+                        # t // u == 1:  No further reduction is possible.
+                        return (t_over_u, f)
+                    elif Term_equals(t.c_term, t_over_u.c_term):
+                        # t // u == t:  Avoid infinite recursion, but continue through the
+                        # loop to see if there is something better.
+                        result = (t, f)
+                        continue
+                    else:
+                        # Recursively search for a simpler pair.
+                        return self.simplify(t_over_u, f)
         # Nothing more left to do.
         return result
 
