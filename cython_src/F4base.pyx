@@ -699,7 +699,7 @@ cdef class Ideal(object):
     cdef public echelons
     cdef public matrices
     cdef public select
-#    cdef public history
+    cdef public history
 
     def __init__(self, *args, PolyRing ring=no_ring):
         if ring is no_ring:
@@ -714,7 +714,7 @@ cdef class Ideal(object):
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
-#        self.history = []
+        self.history = []
 
     cdef mult(self, prod):
         """
@@ -809,12 +809,12 @@ cdef class Ideal(object):
             return self._groebner_basis
         self.make_monic_generators()
         G, P = [], set()
-#        self.history.append(F4State(G, P, set()))
+        self.history.append(F4State(G, P, set()))
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
             Sel = self.select(P)
-#            self.history.append(F4State(G, P, Sel))
+            self.history.append(F4State(G, P, Sel))
             L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
             tilde_F_plus = self.reduce(L, G)
             P = P - Sel
@@ -1004,7 +1004,7 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
-#        self.history[-1].S = list(S)
+        self.history[-1].S = list(S)
         return S
 
     def update(self, G, P, h):
