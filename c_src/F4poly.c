@@ -343,7 +343,7 @@ bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
 static bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
 		      int bottom, int top, int* index) {
   int middle;
-  int64_t td;
+  int td;
   if (top - bottom == 1) {
     if (Term_equals(t, P->terms + bottom)) {
 	*index = bottom;
@@ -652,6 +652,31 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int prime, int rank
   return true;	       
 }
 
+/** Use bisection to find the coefficient of P with a given column index.
+ *
+ * Return false if no non-zero coefficient of P has the column index.
+ * When the column indexes are available this is quite a bit faster.
+ */
+
+static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
+                            int* coefficient) {
+  int middle;
+  if (top - bottom == 1) {
+    if (column == P->coefficients[bottom].column_index) {
+	*coefficient = P->coefficients[bottom].value;
+	return true;
+      } else {
+	return false;
+      }
+  }
+  middle = (top + bottom) >> 1;
+  if (P->coefficients[middle].column_index < column) {
+    return coeff_in_column(P, column, bottom, middle, coefficient);
+  } else {
+    return coeff_in_column(P, column, middle, top, coefficient);
+  }
+}
+
 /** Echelon Form
  *
  * Input an array P of Polynomial pointers, and an array answer of unitialized
@@ -665,7 +690,7 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
                   size_t num_rows) {
   int i, j, coeff;
   Polynomial_t *row_i, *row_j;
-  Term_t* head;
+  int head;
   if (!Poly_matrix_init(P, num_rows, prime, rank)) {
     // free stuff ...
     return false;
@@ -685,13 +710,12 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
   for (i = 0; i < num_rows; i++) {
     row_i = answer + i;
     if (row_i->num_terms == 0) continue;
-    head = row_i->terms;
+    head = row_i->coefficients->column_index;
     for (j = 0; j < num_rows; j++) {
       if (i == j) continue;
       row_j = answer + j;
       if (row_j->num_terms == 0) continue;
-      coeff = Poly_coeff(row_j, head, rank);
-      if (coeff != 0) {
+      if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
         if (! row_op(row_i, answer+j, coeff, prime, rank)) {
           return false;
         }
