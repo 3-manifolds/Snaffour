@@ -53,7 +53,7 @@ cdef extern from "F4.h":
     cdef int inverse_mod(int p, int x);
 
     cdef struct coeff_s:
-        int total_degree
+        int column_index
         int value
     ctypedef coeff_s coeff_t
 
@@ -66,8 +66,6 @@ cdef extern from "F4.h":
     cdef bool Poly_alloc(Polynomial_t* P, size_t size, int tank)
     cdef void Poly_free(Polynomial_t* P)
     cdef void Poly_print(Polynomial_t* P, int rank)
-    cdef void Poly_init(Polynomial_t* P, size_t size, Term_t* terms, coeff_t* coefficients,
-                        int rank)
     cdef void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank)
     cdef bool Poly_equals(Polynomial_t* P, Polynomial_t *Q)
     cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
@@ -81,7 +79,8 @@ cdef extern from "F4.h":
     cdef void Poly_sort(Polynomial_t *P, int num_polys, bool increasing)
     cdef bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size,
                          int rank);
-
+    cdef int Poly_column_index(Polynomial_t* P, Term_t* t, int rank)
+    
 cdef extern from "Python.h":
     pass
 
@@ -551,7 +550,7 @@ cdef class Polynomial(object):
         cdef Term t = m.term
         cdef int N = self.c_poly.num_terms
         self.c_poly.terms[N] = t.c_term[0]
-        self.c_poly.coefficients[N].total_degree = t.total_degree
+        self.c_poly.coefficients[N].column_index = -1
         self.c_poly.coefficients[N].value = m.coefficient
         self.c_poly.num_terms += 1
 
@@ -577,6 +576,9 @@ cdef class Polynomial(object):
         """
         return Poly_coeff(&self.c_poly, t.c_term, self.ring.rank)
 
+    def column_index(self, Term t):
+        return Poly_column_index(&self.c_poly, t.c_term, self.ring.rank)
+        
 cdef class Pair:
     """
     A "critical pair" consisting of two polynomials which can be combined to

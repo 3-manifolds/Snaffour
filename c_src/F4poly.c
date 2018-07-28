@@ -179,17 +179,41 @@ void Poly_print(Polynomial_t* P, int rank) {
   }
 }
 
-/** Initialize a Polynomial from arrays of terms and coefficients.
+/** Static function to compare two Terms in two Polynomials
+ *
+ * Compare the pth term of P to the qth term of Q and return an integer which is
+ * < 0 if the first one is smaller, > 0 if the second one is smaller and 0 if
+ * they are equal.  The 0 term is considered larger than any non-zero term.
  */
 
-void Poly_init(Polynomial_t* P, size_t size, Term_t* terms, coeff_t* coefficients, int rank) {
-  int i;
-  P->num_terms = size;
-  P->rank = rank;
-  for (i=0; i < size; i++) {
-    P->terms[i] = terms[i];
-    P->coefficients[i] = coefficients[i];
+static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
+  int result;
+  /* First deal with the case where one or both Polynomials is 0 (with NULL pointers).*/
+   if (P->num_terms == 0) {
+    if (Q->num_terms != 0) {
+      return 1;
+    } else {
+      return 0;
+    }
   }
+  if (Q->num_terms == 0) {
+    return -1;
+  }
+  int P_index = P->coefficients[p].column_index;
+  int Q_index = Q->coefficients[q].column_index;
+  if (P_index >= 0 && Q_index >= 0) {
+    /* If both column indexes are non-negative, use them for the comparison. */
+    result = P_index - Q_index;
+  } else {
+    /* Otherwise do the comparison from scratch. */
+    Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
+    int td1, td2, td_cmp;
+    td1 = Term_total_degree(P_term, P->rank);
+    td2 = Term_total_degree(Q_term, Q->rank);
+    td_cmp = td1 - td2;
+    result = td_cmp == 0 ? Term_revlex_diff(Q_term, P_term, P->rank) : td_cmp;
+  }
+  return result;
 }
 
 /** Static function to compute P + a*Q for an int a.
@@ -202,29 +226,23 @@ void Poly_init(Polynomial_t* P, size_t size, Term_t* terms, coeff_t* coefficient
 
 static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t* answer,
                   int prime, int rank) {
-  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, p_td, q_td;
+  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
   Term_t term;
   coeff_t p_coeff, q_coeff;
   if (! Poly_alloc(answer, size, rank)) {
     return false;
   }
   while (p < P->num_terms && q < Q->num_terms) {
-    p_td = P->coefficients[p].total_degree;
-    q_td = Q->coefficients[q].total_degree;
-    int td_cmp = p_td - q_td;
-    int revlex_cmp = td_cmp == 0 ? Term_revlex_diff(Q->terms + q, P->terms + p, rank) : 0;
-    if (td_cmp > 0 || revlex_cmp > 0) {
-      /* deg P > deg Q */
+    cmp = Poly_compare_terms(P, p, Q, q);
+    if (cmp > 0) { /* deg P > deg Q */
       answer->terms[N] = P->terms[p];
       answer->coefficients[N++] = P->coefficients[p++];
-    } else if (td_cmp < 0 || revlex_cmp < 0) {
-      /* deg P < deg Q */
+    } else if (cmp < 0) { /* deg P < deg Q */
       answer->terms[N] = Q->terms[q];
       q_coeff = Q->coefficients[q++];
       q_coeff.value = multiply_mod(prime, a, q_coeff.value);
       answer->coefficients[N++] = q_coeff;
-    } else {
-      /* deg P == deg Q */
+    } else { /* deg P == deg Q */
       term = P->terms[p];
       p_coeff = P->coefficients[p++];
       q_coeff = Q->coefficients[q++];
@@ -249,9 +267,9 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
   answer->num_terms = N;
   answer->rank = rank;
   /*
-   * It's not clear if this is a good idea. It often won't save much memory and
-   * could conceivably cause fragmentation or waste time.  But it does free
-   * everything when the answer is 0, at least on linux.
+   * It's not completely clear whether this is a good idea. It often won't save
+   * much memory and could conceivably cause fragmentation or waste time.  But
+   * it does free everything when the answer is 0, at least on linux.
    */
   answer->terms = realloc((void*)answer->terms, sizeof(Term_t)*N);
   answer->coefficients = realloc((void*)answer->coefficients, sizeof(coeff_t)*N);
@@ -335,7 +353,7 @@ static bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
       }
   }
   middle = (top + bottom) >> 1;
-  td = P->coefficients[middle].total_degree;
+  td = Term_total_degree(P->terms + middle, rank);
   if (td < t_td || (td == t_td && Term_revlex_diff(P->terms + middle, t, rank) > 0)) {
     return find_index(P, t, t_td, rank, bottom, middle, index);
   } else {
@@ -360,6 +378,17 @@ int Poly_coeff(Polynomial_t* P, Term_t* t, int rank) {
   return 0;
 }
 
+int Poly_column_index(Polynomial_t* P, Term_t* t, int rank) {
+  int index, t_td = Term_total_degree(t, rank);
+  if (P->num_terms == 0) {
+    return 0;
+  }
+  if (find_index(P, t, t_td, rank, 0, P->num_terms, &index)) {
+    return P->coefficients[index].column_index;
+  }
+  return 0;
+}
+
 /** Multiply a Polynomial by a Term.
  *
  * Much of the F4 algorithm works with "unevaluated products" (t, f) but eventually
@@ -375,7 +404,6 @@ bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime
   for (N=0; N < P->num_terms; N++) {
     Term_multiply(t, P->terms + N, answer->terms + N);
     p_coeff = P->coefficients[N];
-    p_coeff.total_degree = Term_total_degree(answer->terms + N, rank);
     answer->coefficients[N] = p_coeff;
   }
   answer->num_terms = N;
@@ -479,30 +507,13 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, int g_coeff, int pri
 static int compare_heads(const void* p1, const void* p2) {
   Polynomial_t* P1 = (Polynomial_t*)p1;
   Polynomial_t* P2 = (Polynomial_t*)p2;
-  Term_t *head1 = P1->terms, *head2 = P2->terms;
-  int td1, td2, td_cmp;
-  if (P1->num_terms == 0) {
-    return 1;
-  }
-  if (P2->num_terms == 0) {
-    return -1;
-  }
-  td1 = Term_total_degree(head1, P1->rank);
-  td2 = Term_total_degree(head2, P2->rank);
-  td_cmp = td1 - td2;
-  return td_cmp == 0 ? Term_revlex_diff(head2, head1, P1->rank) : td_cmp;
+  return Poly_compare_terms(P1, 0, P2, 0);
 }
 
 static int compare_heads_dec(const void* p1, const void* p2) {
   Polynomial_t* P1 = (Polynomial_t*)p1;
   Polynomial_t* P2 = (Polynomial_t*)p2;
-  if (P1->num_terms == 0) {
-    return 1;
-  }
-  if (P2->num_terms == 0) {
-    return -1;
-  }
-  return -compare_heads(p1, p2);
+  return Poly_compare_terms(P2, 0, P1, 0);
 }
 
 void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
@@ -513,6 +524,134 @@ void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
   }
 }
 
+/** Merge two arrays of monomials.
+ */ 
+
+static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
+			       monomial_array_t *answer, int rank) {
+  int size = M0.size + M1.size, p = 0, q = 0, N = 0, td0, td1;
+  monomial_array_t merged;
+  merged.monomials = (monomial_t*)malloc(sizeof(monomial_t)*size);
+  if (merged.monomials == NULL) {
+    answer->size = 0;
+    answer->monomials = NULL;
+    return false;
+  }
+  while (p < M0.size && q < M1.size) {
+    Term_t *T0 = M0.monomials[p].term, *T1 = M1.monomials [q].term;
+    td0 = Term_total_degree(T0, rank);
+    td1 = Term_total_degree(T1, rank);
+    int td_cmp = td0 - td1;
+    int revlex_cmp = td_cmp == 0 ? Term_revlex_diff(T1, T0, rank) : 0;
+    if (td_cmp > 0 || revlex_cmp > 0) {
+      /* M0[p] > M1[q] */
+      merged.monomials[N++] = M0.monomials[p++];
+    } else if (td_cmp < 0 || revlex_cmp < 0) {
+      /* M1[q] > M0[p]*/
+      merged.monomials[N++] = M1.monomials[q++];
+    } else {
+      /* M0[p] == M1[q] */
+      merged.monomials[N++] = M0.monomials[p++];
+      merged.monomials[N] = M1.monomials[q++];
+      /* Mark the duplicate by setting its column_index to a special value. */
+      merged.monomials[N++].coefficient->column_index = DUPLICATE;
+    }
+  }
+  /* At most one of these two loops will be non-trivial. */
+  while (p < M0.size) {
+    merged.monomials[N++] = M0.monomials[p++];
+  }
+  while (q < M1.size) {
+    merged.monomials[N++] = M1.monomials[q++];
+  }
+  merged.size = N;
+  *answer = merged;
+  return true;
+}
+
+/** Merge many arrays of monomials by divide and conquer.
+ */
+
+static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t *answer,
+			   int rank) {
+  if (num_arrays == 1) {
+    answer->monomials = (monomial_t*)malloc(M[0].size*sizeof(monomial_t));
+    if (answer->monomials == NULL) {
+      return false;
+    }
+    memcpy((void*)answer->monomials, M[0].monomials, M[0].size*sizeof(monomial_t));
+    answer->size = M[0].size;
+    return true;
+  }
+  if (num_arrays == 2) {
+      return monomial_merge_two(M[0], M[1], answer, rank);
+  }
+  int left = num_arrays / 2, right = num_arrays - left;
+  monomial_array_t left_answer, right_answer;
+  bool result;
+  if (! monomial_merge(M, left, &left_answer, rank)) {
+    return false;
+  }
+  if (! monomial_merge(M + left, right, &right_answer, rank)) {
+    free(left_answer.monomials);
+    return false;
+  }
+  result = monomial_merge_two(left_answer, right_answer, answer, rank);
+  free(left_answer.monomials);
+  free(right_answer.monomials);
+  return result;
+}
+
+/* Initialize a matrix
+ * 
+ * Inputs an array P of polynomial pointers.  Sorts all of the terms which
+ * appear in any of the polynomials and uses the sort position to set the
+ * column_index field of each coefficient.  The purpose of this is to speed up
+ * comparisons during the row operations.  (When the column_index values are
+ * non-negative they are used for comparisons instead of the more expensive
+ * comparison of total orders and lex ordering of exponents.  Negative values
+ * serve as flags.)
+ */
+
+static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int prime, int rank) {
+  int num_monomials = 0, i, j, index;
+  monomial_t *pool;
+  monomial_array_t monomial_arrays[num_rows], previous, merged;
+  for (i = 0; i < num_rows; i++) {
+    num_monomials += P[i]->num_terms;
+  }
+  pool = (monomial_t*)malloc(num_monomials*sizeof(monomial_t));
+  if (pool == NULL) {
+    return false;
+  }
+  previous.size = 0; previous.monomials = pool;
+  for (i = 0; i < num_rows; i++) {
+    monomial_arrays[i].size = P[i]->num_terms;
+    monomial_arrays[i].monomials = previous.monomials + previous.size;
+    previous = monomial_arrays[i]; 
+  }
+  for (i = 0; i < num_rows; i ++) {
+    for (j = 0; j < P[i]->num_terms; j++){
+      monomial_arrays[i].monomials[j].term = P[i]->terms + j;
+      monomial_arrays[i].monomials[j].coefficient = P[i]->coefficients + j;
+    }
+  }
+  if (! monomial_merge(monomial_arrays, num_rows, &merged, P[0]->rank)) {
+    printf("merge failed!\n");
+  }
+  index = 0;
+  for (i = merged.size - 1; i >= 0; i--) {
+    int saved_index = merged.monomials[i].coefficient->column_index;
+    merged.monomials[i].coefficient->column_index = index;
+    if (saved_index != DUPLICATE) {
+      index++;
+    }
+  }
+  free(merged.monomials);
+  free(pool);
+  return true;	       
+}
+
 /** Echelon Form
  *
  * Input an array P of Polynomial pointers, and an array answer of unitialized
@@ -521,16 +660,19 @@ void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
  * array.  Then row operations are performed on the answer array until each
  * leading term occurs in exactly one row.
  */
-    
 
 bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
                   size_t num_rows) {
   int i, j, coeff;
   Polynomial_t *row_i, *row_j;
   Term_t* head;
+  if (!Poly_matrix_init(P, num_rows, prime, rank)) {
+    // free stuff ...
+    return false;
+  }
   for(i = 0; i < num_rows; i++) {
-    *(answer + i) = zero;
-    if (! Poly_make_monic(*(P+i), answer+i, prime, rank)) {
+    answer[i] = zero;
+    if (! Poly_make_monic(P[i], answer+i, prime, rank)) {
       return false;
     }
   }
@@ -560,6 +702,16 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
    * While we are here in C land, lets sort the result by decreasing head term.
    */
   qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads_dec);
+  /*
+   * Unset the column indexes to avoid confusion when using the rows later.
+   */
+  for (i = 0; i < num_rows; i++) {
+    row_i = answer + i; 
+    if (row_i->num_terms == 0) continue;
+    for (j = 0; j <  row_i->num_terms;  j++) {
+      row_i->coefficients[j].column_index = INDEX_UNSET;
+    }
+  }
   return true;
 }
 

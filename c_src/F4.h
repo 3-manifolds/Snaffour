@@ -69,19 +69,31 @@ bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
 
 /** Coefficients in a Polynomial.
  *
- * The coefficient also stores the total degree of its term because the 32 byte
- * Terms must be in 16-byte aligned memory.  It would be a waste to use 16 bytes
- * to store the total degree, but adding a smaller field to the struct Term_s
- * would mess up the alignment.  Using MMX operations on unaligned data causes
- * rather impressive segfaults which even crash gdb, making debugging of alignment
- * errors quite interesting.
+ * The coefficient also stores a column index, which is used in the echelon
+ * reduction to speed up comparisons of Terms.  The indiex should be set to
+ * INDEX_UNSET when a coefficient is created and is reset to INDEX_UNSET after
+ * computing the reduced echelon form.
  */
 
+/* Negative values of the column index are used as flags.*/
+#define INDEX_UNSET  -1
+#define DUPLICATE  -2
+
 typedef struct coeff_s {
-  int total_degree;
+  int column_index;
   int value;
 } coeff_t;
 
+typedef struct monomial_s {
+  Term_t* term;
+  coeff_t* coefficient;
+} monomial_t;
+
+typedef struct monomial_array_s {
+  int size;
+  monomial_t* monomials;
+} monomial_array_t;
+  
 int inverse_mod(int p, int x);
 
 /** Polynomials
@@ -125,7 +137,6 @@ typedef struct Polynomial_s {
 bool Poly_alloc(Polynomial_t *P, size_t size, int rank);
 void Poly_free(Polynomial_t* P);
 void Poly_print(Polynomial_t* P, int rank);
-void Poly_init(Polynomial_t* P, size_t size, Term_t* terms, coeff_t* coefficients, int rank);
 void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank);
 bool Poly_equals(Polynomial_t* P, Polynomial_t *Q);
 bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
@@ -138,6 +149,7 @@ bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);
 void Poly_sort(Polynomial_t *P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size, int rank);
+int Poly_column_index(Polynomial_t* P, Term_t* t, int rank);
 
 #define F_FOUR_H
 #endif
