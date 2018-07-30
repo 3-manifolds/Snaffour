@@ -530,7 +530,7 @@ void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
 }
 
 /** Merge two arrays of monomials.
- */ 
+ */
 
 static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
 			       monomial_array_t *answer, int rank) {
@@ -608,7 +608,7 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
 }
 
 /* Initialize a matrix
- * 
+ *
  * Inputs an array P of polynomial pointers.  Sorts all of the terms which
  * appear in any of the polynomials and uses the sort position to set the
  * column_index field of each coefficient.  The purpose of this is to speed up
@@ -637,7 +637,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
   for (i = 0; i < num_rows; i++) {
     monomial_arrays[i].size = P[i]->num_terms;
     monomial_arrays[i].monomials = previous.monomials + previous.size;
-    previous = monomial_arrays[i]; 
+    previous = monomial_arrays[i];
   }
   for (i = 0; i < num_rows; i ++) {
     for (j = 0; j < P[i]->num_terms; j++){
@@ -659,7 +659,8 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
   *num_columns = index;
   free(merged.monomials);
   free(pool);
-  return true;	       
+
+  return true;
 }
 
 /** Use bisection to find the coefficient of P with a given column index.
@@ -705,7 +706,6 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
     // free stuff ...
     return false;
   }
-  printf("Matrix has size %d x %d.\n", num_rows, num_columns);
   for(i = 0; i < num_rows; i++) {
     answer[i] = zero;
     if (! Poly_make_monic(P[i], answer+i, prime, rank)) {
@@ -741,7 +741,7 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
    * Unset the column indexes to avoid confusion when using the rows later.
    */
   for (i = 0; i < num_rows; i++) {
-    row_i = answer + i; 
+    row_i = answer + i;
     if (row_i->num_terms == 0) continue;
     for (j = 0; j <  row_i->num_terms;  j++) {
       row_i->coefficients[j].column_index = INDEX_UNSET;
