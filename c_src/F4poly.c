@@ -124,16 +124,15 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
 
 /** Allocate or reallocate memory for a Polynomial with specified maximum size.
  *
- * Sets num_terms to 0, but allocates memory for terms and coefficients.
+ * Sets num_terms to 0 and ensure that there is enough memory for up to "size" 
+ * terms and coefficients.  These arrays are enlarged with realloc if necessary.
+ *
  * Note that allocation and deallocation of Polynomial_s structs is not
  * handled by this library.  That shoud be done by Python.
  */
 
-bool Poly_alloc(Polynomial_t* P, size_t size, int rank) {
+bool Poly_alloc(Polynomial_t* P, int size, int rank) {
   int old_size = P->max_size;
-  P->num_terms = 0;
-  P->max_size = size;
-  P->rank = rank;
   if (size > old_size) {
     P->terms = realloc(P->terms, sizeof(Term_t)*size);
     if (P->terms == NULL) {
@@ -144,7 +143,10 @@ bool Poly_alloc(Polynomial_t* P, size_t size, int rank) {
       free(P->terms);
       return false;
     }
+    P->max_size = size;
   }
+  P->num_terms = 0;
+  P->rank = rank;
   return true;
 }
 
@@ -165,6 +167,19 @@ void Poly_free(Polynomial_t* P) {
   P->rank = 0;
   P->terms = NULL;
   P->coefficients = NULL;
+}
+
+/** Copy a Polynomial's data into another Polynomial
+ */
+void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
+  int i;
+  /* First make sure there is enough room in the destinaion. */
+  Poly_alloc(dest, src->num_terms, src->rank);
+  for (i=0; i < src->num_terms; i++) {
+    dest->terms[i] = src->terms[i];
+    dest->coefficients[i] = src->coefficients[i];
+  }
+  dest->num_terms = src->num_terms;
 }
 
 /** Print a Polynomial in a crude way, without variable names.
@@ -442,34 +457,17 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
  * are modified in place.
  */
 
-bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank) {
+void Poly_make_monic(Polynomial_t *P, int prime, int rank) {
   int N = 0, a_inverse = inverse_mod(prime, P->coefficients[0].value);
-  coeff_t p_coeff;
-  if (P != answer) {
-    if (! Poly_alloc(answer, P->num_terms, rank)) {
-      return false;
-    }
-    for (N=0; N < P->num_terms; N++) {
-      answer->terms[N] = P->terms[N];
-      p_coeff = P->coefficients[N];
-      p_coeff.value = multiply_mod(prime, a_inverse, p_coeff.value);
-      answer->coefficients[N] = p_coeff;
-    }
-    answer->num_terms = N;
-    answer->rank = rank;
-  } else {
-    /* Modify the coefficients in place. */
-    for (N=0; N < P->num_terms; N++) {
-      P->coefficients[N].value = multiply_mod(prime, a_inverse, P->coefficients[N].value);
-    }
+  for (N=0; N < P->num_terms; N++) {
+    P->coefficients[N].value = multiply_mod(prime, a_inverse, P->coefficients[N].value);
   }
-  return true;
 }
 
 /** A global zero polynomial.
  */
 
-Polynomial_t zero = {.num_terms = 0, .terms = NULL, .coefficients = NULL};
+Polynomial_t zero = {.num_terms = 0, .max_size = 0, .terms = NULL, .coefficients = NULL};
 
 /** The basic row operation
  *
@@ -622,8 +620,8 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
  */
 
 static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
-                             int prime, int rank) {
-  int num_monomials = 0, i, j, index;
+                             Polynomial_t *matrix, int prime, int rank) {
+  int num_monomials = 0, i, j, index, size;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
   for (i = 0; i < num_rows; i++) {
@@ -645,7 +643,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
       monomial_arrays[i].monomials[j].coefficient = P[i]->coefficients + j;
     }
   }
-  if (! monomial_merge(monomial_arrays, num_rows, &merged, P[0]->rank)) {
+  if (! monomial_merge(monomial_arrays, num_rows, &merged, rank)) {
     printf("merge failed!\n");
   }
   index = 0;
@@ -657,9 +655,19 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
     }
   }
   *num_columns = index;
+  size = index;
   free(merged.monomials);
   free(pool);
-
+  for (i = 0; i < num_rows; i++) {
+    matrix[i] = zero;
+    if (!Poly_alloc(matrix + i, size, rank)) {
+      for (j = 0; j < i; j++) {
+        Poly_free(matrix + i);
+        return false;
+      }
+    }
+    Poly_copy(P[i], matrix + i);
+  }
   return true;
 }
 
@@ -702,15 +710,12 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
   int i, j, coeff, num_columns;
   Polynomial_t *row_i, *row_j;
   int head;
-  if (!Poly_matrix_init(P, num_rows, &num_columns, prime, rank)) {
+  if (!Poly_matrix_init(P, num_rows, &num_columns, answer, prime, rank)) {
     // free stuff ...
     return false;
   }
   for(i = 0; i < num_rows; i++) {
-    answer[i] = zero;
-    if (! Poly_make_monic(P[i], answer+i, prime, rank)) {
-      return false;
-    }
+    Poly_make_monic(P[i], prime, rank);
   }
   /*
    * The best pivoting strategy I have found is to sort by increasing head term
@@ -727,7 +732,7 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
       row_j = answer + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, answer+j, coeff, prime, rank)) {
+        if (! row_op(row_i, row_j, coeff, prime, rank)) {
           return false;
         }
       }

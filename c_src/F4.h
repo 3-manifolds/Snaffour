@@ -135,16 +135,17 @@ typedef struct Polynomial_s {
   Term_t* terms;
 } Polynomial_t;
 
-bool Poly_alloc(Polynomial_t *P, size_t size, int rank);
+bool Poly_alloc(Polynomial_t *P, int size, int rank);
 void Poly_free(Polynomial_t* P);
 void Poly_print(Polynomial_t* P, int rank);
+void Poly_copy(Polynomial_t* src, Polynomial_t* dest);
 void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank);
 bool Poly_equals(Polynomial_t* P, Polynomial_t *Q);
 bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank);
 bool Poly_make_row(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
-bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank);
+void Poly_make_monic(Polynomial_t *P, int prime, int rank);
 bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows, int prime, int rank);
 bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);

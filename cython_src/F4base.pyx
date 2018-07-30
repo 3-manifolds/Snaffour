@@ -63,15 +63,16 @@ cdef extern from "F4.h":
         coeff_t* coefficients
         Term_t* terms
     ctypedef Polynomial_s Polynomial_t
-    cdef bool Poly_alloc(Polynomial_t* P, size_t size, int tank)
+    cdef bool Poly_alloc(Polynomial_t* P, int size, int rank)
     cdef void Poly_free(Polynomial_t* P)
+    cdef void Poly_copy(Polynomial_t* src, Polynomial_t* dest)
     cdef void Poly_print(Polynomial_t* P, int rank)
     cdef void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank)
     cdef bool Poly_equals(Polynomial_t* P, Polynomial_t *Q)
     cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank)
-    cdef bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank)
+    cdef void Poly_make_monic(Polynomial_t *P, int prime, int rank)
     cdef bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows, int prime,
                            int rank)
     cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
@@ -790,14 +791,13 @@ cdef class Ideal(object):
         else:
             return f
 
-
     cdef make_monic_generators(self):
         cdef Polynomial f, g
         self.monic_generators = []
         for f in self.generators:
              g = Polynomial(ring=self.ring)
-             if not Poly_make_monic(&f.c_poly, &g.c_poly, self.ring.BIG_PRIME, self.ring.rank):
-                 raise RuntimeError('Out of memory!')
+             Poly_copy(&f.c_poly, &g.c_poly)
+             Poly_make_monic(&g.c_poly, self.ring.BIG_PRIME, self.ring.rank)
              g.decorate()
              self.monic_generators.append(g)
 
