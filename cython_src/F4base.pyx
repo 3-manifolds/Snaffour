@@ -72,8 +72,8 @@ cdef extern from "F4.h":
     cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank)
     cdef bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank)
-    cdef bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
-                           size_t num_rows)
+    cdef bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows, int prime,
+                           int rank)
     cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
     cdef bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank)
     cdef void Poly_sort(Polynomial_t *P, int num_polys, bool increasing)
@@ -662,7 +662,7 @@ cdef class PolyMatrix(object):
             assert isinstance(p, Polynomial)
             assert p.ring is self.ring
             polys[n] = &p.c_poly
-        if not Poly_echelon(polys, answer, self.ring.BIG_PRIME, self.ring.rank, N):
+        if not Poly_echelon(polys, answer, N, self.ring.BIG_PRIME, self.ring.rank):
             raise RuntimeError('Out of memory')
         rows = []
         m = 0

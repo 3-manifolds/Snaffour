@@ -128,8 +128,9 @@ int inverse_mod(int p, int x);
  */
 
 typedef struct Polynomial_s {
-  int num_terms;
-  int rank;
+  int num_terms;          /* How many terms in this Polynomial. */
+  int max_size;           /* How many terms and coefficients the allocated memory will hold. */
+  int rank;               /* The number of variables in the parent polynomial ring. */
   coeff_t* coefficients;
   Term_t* terms;
 } Polynomial_t;
@@ -144,12 +145,18 @@ bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
 int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank);
 bool Poly_make_row(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
 bool Poly_make_monic(Polynomial_t *P, Polynomial_t *answer, int prime, int rank);
-bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank, size_t num_rows);
+bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows, int prime, int rank);
 bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);
 void Poly_sort(Polynomial_t *P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size, int rank);
 int Poly_column_index(Polynomial_t* P, Term_t* t, int rank);
+
+/*
+ * In Poly_echelon, rows of the matrix are initially allocated with a maximum size equal to
+ * POLY_SIZE_FACTOR * (number of columns)
+ */
+#define POLY_SIZE_FACTOR 0.5
 
 #define F_FOUR_H
 #endif

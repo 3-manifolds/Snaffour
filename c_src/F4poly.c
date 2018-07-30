@@ -122,7 +122,7 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
 /** \page modP Polynomials
  */
 
-/** Allocate memory for a Polynomial with specified number of terms.
+/** Allocate or reallocate memory for a Polynomial with specified maximum size.
  *
  * Sets num_terms to 0, but allocates memory for terms and coefficients.
  * Note that allocation and deallocation of Polynomial_s structs is not
@@ -130,17 +130,20 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
  */
 
 bool Poly_alloc(Polynomial_t* P, size_t size, int rank) {
-  Poly_free(P);
+  int old_size = P->max_size;
   P->num_terms = 0;
+  P->max_size = size;
   P->rank = rank;
-  P->terms = malloc(sizeof(Term_t)*size);
-  if (P->terms == NULL) {
-    return false;
-  }
-  P->coefficients = malloc(sizeof(coeff_t)*size);
-  if (P->coefficients == NULL) {
-    free(P->terms);
-    return false;
+  if (size > old_size) {
+    P->terms = realloc(P->terms, sizeof(Term_t)*size);
+    if (P->terms == NULL) {
+      return false;
+    }
+    P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size);
+    if (P->coefficients == NULL) {
+      free(P->terms);
+      return false;
+    }
   }
   return true;
 }
@@ -271,12 +274,12 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
    * much memory and could conceivably cause fragmentation or waste time.  But
    * it does free everything when the answer is 0, at least on linux.
    */
-  answer->terms = realloc((void*)answer->terms, sizeof(Term_t)*N);
-  answer->coefficients = realloc((void*)answer->coefficients, sizeof(coeff_t)*N);
-  if ((answer->terms == NULL || answer->coefficients == NULL) && N != 0) {
-      Poly_free(answer);
-      return false;
-    }
+  /* answer->terms = realloc((void*)answer->terms, sizeof(Term_t)*N); */
+  /* answer->coefficients = realloc((void*)answer->coefficients, sizeof(coeff_t)*N); */
+  /* if ((answer->terms == NULL || answer->coefficients == NULL) && N != 0) { */
+  /*     Poly_free(answer); */
+  /*     return false; */
+  /*   } */
   return true;
 }
 
@@ -314,7 +317,8 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
 
 bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank) {
   if (P == Q) {
-    Poly_free(answer);
+    answer->num_terms = 0;
+    //Poly_free(answer);
     return true;
   }
   return Poly_p_plus_aq(P, prime - 1, Q, answer, prime, rank);
@@ -492,6 +496,7 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, int g_coeff, int pri
       new_row.coefficients[n].value = multiply_mod(prime, a_inverse, coeff);
     }
   }
+  /* FIX ME */
   Poly_free(g);
   *g = new_row;
   return true;
@@ -611,9 +616,13 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
  * non-negative they are used for comparisons instead of the more expensive
  * comparison of total orders and lex ordering of exponents.  Negative values
  * serve as flags.)
+ *
+ * The number of columns in the matrix having the input polynomials as its rows
+ * is stored in the int referenced by num_columns.
  */
 
-static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int prime, int rank) {
+static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
+                             int prime, int rank) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
@@ -647,6 +656,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int prime, int rank
       index++;
     }
   }
+  *num_columns = index;
   free(merged.monomials);
   free(pool);
   return true;	       
@@ -686,15 +696,16 @@ static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
  * leading term occurs in exactly one row.
  */
 
-bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
-                  size_t num_rows) {
-  int i, j, coeff;
+bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
+                  int prime, int rank) {
+  int i, j, coeff, num_columns;
   Polynomial_t *row_i, *row_j;
   int head;
-  if (!Poly_matrix_init(P, num_rows, prime, rank)) {
+  if (!Poly_matrix_init(P, num_rows, &num_columns, prime, rank)) {
     // free stuff ...
     return false;
   }
+  printf("Matrix has size %d x %d.\n", num_rows, num_columns);
   for(i = 0; i < num_rows; i++) {
     answer[i] = zero;
     if (! Poly_make_monic(P[i], answer+i, prime, rank)) {
@@ -738,6 +749,8 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int prime, int rank,
   }
   return true;
 }
+
+// This should be constructed as part of the echelon form computation.
 
 /*
  * Allocate an array and fill it with all of the distinct terms, in descending
