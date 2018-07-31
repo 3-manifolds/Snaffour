@@ -128,7 +128,7 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
  * terms and coefficients.  These arrays are enlarged with realloc if necessary.
  *
  * Note that allocation and deallocation of Polynomial_s structs is not
- * handled by this library.  That shoud be done by Python.
+ * handled by this library.  That should be done by Cython.
  */
 
 bool Poly_alloc(Polynomial_t* P, int size, int rank) {
