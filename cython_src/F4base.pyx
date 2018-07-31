@@ -153,7 +153,9 @@ cdef class Term(object):
     stored in an array of two 16-byte vector types suitable for use in a 128-bit
     SSE2 MMX register.
 
-    >>> R = PolyRing('x', 'y', 'z')
+    >>> R = PolyRing(*'xyz')
+    >>> R.variables
+    ('x', 'y', 'z')
     >>> t1 = Term(1,2,3,ring=R)
     >>> t2 = Term(2,2,1,ring=R)
     >>> t1, t2
@@ -168,6 +170,12 @@ cdef class Term(object):
     >>> y = Term(0,1,0,ring=R)
     >>> z = Term(0,0,1,ring=R)
     >>> x*x > x*y > y*y > x*z > y*z > z*z
+    True
+    >>> R = PolyRing(*'abcdefghijklmnopqrstuvwzyz')
+    >>> S = R.Term(2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+    >>> T = R.Term(1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
+    >>> U = R.Term(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2)
+    >>> U < T < S
     True
     """
     cdef Term_t *c_term
@@ -283,7 +291,7 @@ cdef class Term(object):
     @property
     def degree(self):
         """
-        Return a tuple of integers representing the degree of this term.
+        Return a tuple of integers representing the degree of this Term.
         """
         cdef int i
         cdef char* powers = <char *>self.c_term
@@ -757,7 +765,7 @@ cdef class Ideal(object):
         return the set of pairs which fail this test.  Otherwise, return
         a Boolean value True if G is Groebner, False if not.
 
-        WARNING: This is very innefficient!
+        WARNING: This is very inefficient!
         """
         result = set()
         pairs = {Pair(g1, g2) for g1, g2 in combinations(G, 2)} - P
@@ -879,22 +887,23 @@ cdef class Ideal(object):
         to compute a set of polynomials to be added to the partial grobner basis
         G.
 
-        This is the Reduction subalgorithm of Faugère's F4.
+        This method is the *Reduction* subalgorithm of Faugère's F4 algorithm.
 
         INPUT:
           * L = (L1, L2), each a list of pairs (t, f), t a term and f a polynomial
           * G, a set of polynomials
 
         SIDE EFFECTS:
-          The echelon form :math:`\tilde F is appended to self.echelons.
+          The echelon form :math:`\tilde F` is appended to self.echelons.
 
-        OUTPUT:
-          * Returns :math:`\tilde F^plus`, the rows of the echelon form of F
-            whose head term was not a head term in F.  In particular, if (t1,g1)
-            and (t2, g2) are in L, with HT(t1*g1) = HT(t2*g2) = Pair(g1,  g2).lcm,
-            then F includes the (simplified) s-polynomial of Pair(g1, g2) and if this
-            s-polynomial has a new head term then it will appear in the reuslt.
-
+        OUTPUT: 
+          * Returns :math:`\tilde F^+`, the rows of the echelon form of
+            :math:`F` such that the head term was not a head term in :math:`F`.  In
+            particular, if :math:`(t_1, g_1)` and :Math:`(t_2, g_2)` are in
+            :math:`L`, with :math:`HT(t1\star g1) = HT(t2\star g2) = Pair(g_1, g_2).lcm`,
+            then :math:`F` includes the (simplified) s-polynomial of
+            :math:`Pair(g_1, g_2)` and if this s-polynomial has a new head term
+            then it will appear in the result.
         """
         cdef tuple rows
         F = self.preprocess(L, G)
@@ -953,45 +962,48 @@ cdef class Ideal(object):
         """
         This method returns the matrix (as a list of polynomials) which will be
         reduced to echelon form in the main loop.  The input L consists of the
-        left and right products (momomial times polynomial) for the selected
-        pairs.  For each pair, the difference between these two products is the
-        s-polynomial.  If the s-polynomial does not reduce to 0 modulo G_n then
-        its reduction must be added to G_n when constructing G_n+1.  The
-        reduction will appear as a row of the echelon form , provided that each
-        product t*g which is used in reducing a term of the s-polynomial is
-        included in the matrix.  It can be recognized because its head term will
-        not appear among the head terms of the rows of the initial matrix.  The
-        purpose of the preprocessing step is to add all such multiples of
-        elements of G_n to the matrix.
+        unevaluated left and right products (term times polynomial) for the
+        selected pairs.  For each pair, the difference between these two
+        products is the s-polynomial.  If the s-polynomial does not reduce to 0
+        modulo :math:`G_n` then its reduction must be added to :math:`G_n` when
+        constructing :math:`G_{n+1}`.  The reduction will appear as a row of the
+        echelon form, provided that each product :math:`t\star g` which is used
+        in reducing a term of the s-polynomial is included in the matrix.  It
+        can be recognized because its head term will not appear among the head
+        terms of the rows of the initial matrix.  The purpose of the
+        preprocessing step is to add all such multiples of elements of
+        :math:`G_n` to the matrix.
 
         There is a serious, but easily fixable error in the pseudocode for the
         preprocessing subalgorithm in Faugère's paper, and this error can lead
         to incorrect computations.  He says to begin the preprocessing by
         replacing each product in the list L by its simplification.  He proves
-        in Theorem 2.4 that the final G will be a Groebner basis if, for each
-        distinct g1, g2 in G, the s-polynomial of their simplifications g1' and
-        g2' has a t-representation with respect to G such that t < lcm(g1, g2).
-        So it would appear to be sufficient that the simplifications of the
-        products in L_n should all reduce to 0 modulo G.  The problem with this
-        reasoning is that it ignores the degenerate case where g1 and g2 have
-        the same simplification.  In that case the s-polynomial of g1' and g2'
-        is zero, and the zero polynomial does not have t-representation by
-        Definition 2.7. So Theorem 2.4 does not apply.  What happens in this
-        case is that the matrix will have two identical rows, which appeared in
-        a previous matrix, and the new head term which should have appeared in
-        the s-polynomial of g1 and g2 will be missing from the final basis.  We
-        observed this happening, and producing a non-Groebner basis, with the
+        in Theorem 2.4 that the final :math:`G` will be a Groebner basis if, for
+        each distinct :math:`g_1, g_2` in :math:`G`, the s-polynomial of their
+        simplifications :math:`g_1'` and :math:`g_2'` has a t-representation
+        with respect to :math:`G` such that :math:`t < lcm(g_1, g_2)`.  So it
+        would appear to be sufficient that the simplifications of the products
+        in :math:`L_n` should all reduce to 0 modulo :math:`G`.  The problem
+        with this reasoning is that it ignores the degenerate case where
+        :math:`g_1` and :math:`g_2` have the same simplification.  In that case
+        the s-polynomial of :math:`g_1'` and :math:`g_2'` is zero, and the zero
+        polynomial does not have a t-representation by Definition 2.7. So
+        Theorem 2.4 does not apply.  What happens in this case is that the
+        matrix will have two identical rows, which appeared in a previous
+        matrix, and the new head term which appears in the s-polynomial of
+        :math:`g_1` and :math:`g_2` will be missing from the final basis.  One
+        can observe this happening, and producing a non-Groebner basis, with the
         Cyclic-4 example when using the identity selection process that selects
-        all pairs, as well as in some of the Buchberger selection processes that
-        select one pair.
+        all pairs, as well as in some of the Buchberger-type selection processes
+        that select one pair.
 
         We mention that Faugère's paper omits the proof of correctness of the F4
         algorithm.  Instead it (mis)states a Theorem from the book by T. Becker
         and V. Weispfenning along with Theorem 2.4, and says that these two results
         could be used in a proof of correctness, without actually giving the proof.
 
-        This is the Symbolic Preprocessing subalgorithm of Faugère's F4 algorithm,
-        modified to correct the error discussed above.
+        This method is the *Symbolic Preprocessing* subalgorithm of Faugère's F4
+        algorithm, modified to correct the error discussed above.
 
         INPUT:
           * L, a list of unevaluated left and right products from a set of pairs
@@ -1087,41 +1099,42 @@ cdef class Ideal(object):
 
     def simplify(self, Term t, Polynomial q):
         r"""
-        The Simplify subalgorithm of F4.
+        This method is the *Simplify* subalgorithm of F4.
 
         INPUT:
           * t, a term
           * q, a polynomial
 
         OUTPUT:
-          * (u, g), where :math:`HT(u\star g) = HT(t\star q)` and (u,g) is simpler
-            in the sense that the term u divides t, usually properly, and g is a row
-            of a previously computed echelon form. The term u will be as small as
-            possible.  This means that the new row :math:`u\star g` will be as close
-            as possible to a previously computed row.
+          * (u, g), where :math:`HT(u\star g) = HT(t\star q)` and :math:`(u, g)` is
+            simpler in the sense that the term :math:`u` divides :math:`t`,
+            usually properly, and :math:`g` is a row of a previously computed
+            echelon form. The term :math:`u` will be as small as possible.  This
+            means that the new row :math:`u\star g` will be as close as possible
+            to a previously computed row.
 
         NOTE: There are three serious typos in the description of this algorithm
         in Faugère's paper.  First he says:
+          "there exists a (unique) :math:`p` in :math:`\tilde F^+_j` such that
+          :math:`HT(P) = HT(u\star f)`".
+        ..
 
-        "there exists a (unique) :math:`p` in :math:`\tilde F^+_j` such that
-        :math:`HT(P) = HT(u\star f)`".
-
-        That is absurd since :math:`HT(u\star q)` is in :math:`HT(F_j)` and
+        But that is absurd since :math:`HT(u\star q)` is in :math:`HT(F_j)` and
         :math:`\tilde F_j^+` is constructed by removing all elements of
         :math:`\tilde F_j` having a head term
         in :math:`HT(F_j)`.  He means that :math:`p` is in :math:`\tilde F_j`.
 
         Second, he says: ":math:`u\star f` is in :math:`F_j`" when he means
         ":math:`HT(u\star f)` is in :math:`HT(F_j)`".
-
+        
         The first typo is fixed in his 2013 slide presentation.  While the
         second typo is not fixed in the slides, his example shows that he is
         only looking at head terms (i.e. top reducibility).  As he explains in
         the slides, the goal of the simplification is to:
-
-        "replace any product :math:`m\star f` by a product :math:`u\star t\star f'`
-        where :math:`t\star f'` is a previously computed row and :math:`u\star t`
-        divides the monomial :math:`m`"
+          "replace any product :math:`m\star f` by a product :math:`u\star t\star f'`
+          where :math:`t\star f'` is a previously computed row and :math:`u\star t`
+          divides the monomial :math:`m`"
+        ..
 
         By "previously computed row" he means a row of of an echelon form
         :math:`\tilde F_j`.  The example suggests that he means that (t, f) should be
@@ -1187,6 +1200,7 @@ cdef class Ideal(object):
     def reduced_groebner_basis(self):
         """
         Return the canonical reduced Gröbner basis of this ideal.
+
         >>> R3 = PolyRing('x', 'y', 'z')
         >>> A = [
         ... R3.Polynomial({(2,2,0):8, (1,3,0):5, (3,0,1):3, (2,1,1):1}),
