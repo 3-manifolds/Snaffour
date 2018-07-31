@@ -133,22 +133,22 @@ void Term_gcd(Term_t *t, Term_t *s, Term_t *answer) {
  * or return 0 if the terms are equal.  Thus a positive value means that t < s,
  * since the lex order is *reversed* in grevlex!
  */
+
 int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
-  int i = 0, R = rank;
-  Term16_t termdiff = t->degree[0] - s->degree[0];
+  int i = rank;
+  Term16_t termdiff;
   char* diff = (char*)&termdiff;
-  while (i < R && diff[i++] == 0) {}
-  if (i <= R) {
-    return diff[i-1];
-  }
-  if (rank > 16) {
-    i -= 16;
-    R -= 16;
+  if (i > 16) {
     termdiff = t->degree[1] - s->degree[1];
-    while (i < R && diff[i++] == 0) {}
-    if (i <= R) {
-      return diff[i-1];
+    while (i >= 16 && diff[i - 16] == 0) {i--;}
+    if (i >= 16) {
+      return diff[i - 16];
     }
+  }
+  termdiff = t->degree[0] - s->degree[0];
+  while (i >= 0 && diff[i] == 0) {i--;}
+  if (i >= 0) {
+    return diff[i];
   }
   return 0;
 }
