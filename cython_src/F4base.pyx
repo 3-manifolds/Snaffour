@@ -705,11 +705,11 @@ cdef class Ideal(object):
     cdef public _groebner_basis
     cdef public _reduced_groebner_basis
     cdef public echelons
-    cdef public matrices
     cdef public select
     cdef public history
+    cdef public verbosity
 
-    def __init__(self, *args, PolyRing ring=no_ring, history=False):
+    def __init__(self, *args, PolyRing ring=no_ring, verbosity=0):
         if ring is no_ring:
             raise ValueError('A PolyRing must be specified.')
         if args and isinstance(args[0], Iterable):
@@ -718,11 +718,11 @@ cdef class Ideal(object):
             self.generators = args
         self.ring = ring
         self.echelons = []
-        self.matrices = []
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
-        if history:
+        self.verbosity = verbosity
+        if verbosity:
             self.history = []
 
     cdef mult(self, prod):
@@ -817,13 +817,13 @@ cdef class Ideal(object):
             return self._groebner_basis
         self.make_monic_generators()
         G, P = [], set()
-        if isinstance(self.history, list):
+        if self.verbosity > 1:
             self.history.append(F4State(G, P, set()))
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
             Sel = self.select(P)
-            if isinstance(self.history, list):
+            if self.verbosity > 1:
                 self.history.append(F4State(G, P, Sel))
             L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
             tilde_F_plus = self.reduce(L, G)
@@ -851,11 +851,25 @@ cdef class Ideal(object):
 
     def normal_select(self, pairs):
         """
-        The normal selector.
+        Faugère's normal selector, slightly modified.
+
+        Experiment shows that it sometimes happens that there are only 1 or 2
+        pairs of minimal degree, and for all of them the head term of the
+        right polynomial divides the head term of the left.  Moreover, the total
+        degree of these few pairs is the same as the previous total degree.
+
+        It is not clear where these pairs come from, but they cause wasted time.
+        So, for now, when this situation arises, we increase the cutoff degree until
+        we find more interesting pairs.
         """
         d = min(p.lcm.total_degree for p in pairs)
         selected = {p for p in pairs if p.lcm.total_degree == d}
-        print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
+        while (len(selected) < len(pairs) and
+               set((True,)) == {p.right_head.divides(p.left_head) for p in selected}):
+               d += 1
+               selected |= {p for p in pairs if p.lcm.total_degree == d}
+        if self.verbosity > 0:
+            print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
         return selected
 
     def reduce(self, L, G):
@@ -886,7 +900,8 @@ cdef class Ideal(object):
         F = self.preprocess(L, G)
         F_ech = PolyMatrix(F)
         rows = F_ech.rows
-        print('matrix size =', F_ech.size())
+        if self.verbosity > 0:
+            print('matrix size =', F_ech.size())
         self.echelons.append(F_ech)
         heads = {f.head_term for f in F}
         return [f for f in rows if f.head_term not in heads]
@@ -1017,7 +1032,7 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
-        if isinstance(self.history, list):
+        if self.verbosity > 1:
             self.history[-1].S = list(S)
         return S
 
