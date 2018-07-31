@@ -854,7 +854,9 @@ cdef class Ideal(object):
         The normal selector.
         """
         d = min(p.lcm.total_degree for p in pairs)
-        return {p for p in pairs if p.lcm.total_degree == d}
+        selected = {p for p in pairs if p.lcm.total_degree == d}
+        print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
+        return selected
 
     def reduce(self, L, G):
         r"""
@@ -884,6 +886,7 @@ cdef class Ideal(object):
         F = self.preprocess(L, G)
         F_ech = PolyMatrix(F)
         rows = F_ech.rows
+        print('matrix size =', F_ech.size())
         self.echelons.append(F_ech)
         heads = {f.head_term for f in F}
         return [f for f in rows if f.head_term not in heads]
