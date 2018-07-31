@@ -1,7 +1,7 @@
 /*   This file is part of the program Snaffour.
  *
  *   Copyright (C) 2018 by Marc Culler, Nathan Dunfield, Matthias Görner
- *   and others. 
+ *   and others.
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -66,8 +66,8 @@ bool Term_equals(Term_t *t, Term_t *s) {
 
 int Term_total_degree(Term_t *t, int rank) {
   char *c = (char *)&t->degree;
-  int degree = 0;
-  for (int i=0; i<rank; i++) {
+  int i, degree = 0;
+  for (i = 0; i < rank; i++) {
     degree += c[i];
   }
   return degree;
@@ -134,16 +134,23 @@ void Term_gcd(Term_t *t, Term_t *s, Term_t *answer) {
  * since the lex order is *reversed* in grevlex!
  */
 int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
-  int i = rank;
-  char *T = (char*)&t->degree;
-  char *S = (char*)&s->degree;
-  while (i >= 0 && T[i] == S[i]) {
-      i--;
-    }
-  if (i < 0) {
-    return 0;  /* t == s */
+  int i = 0, R = rank;
+  Term16_t termdiff = t->degree[0] - s->degree[0];
+  char* diff = (char*)&termdiff;
+  while (i < R && diff[i++] == 0) {}
+  if (i <= R) {
+    return diff[i-1];
   }
-  return T[i] - S[i];
+  if (rank > 16) {
+    i -= 16;
+    R -= 16;
+    termdiff = t->degree[1] - s->degree[1];
+    while (i < R && diff[i++] == 0) {}
+    if (i <= R) {
+      return diff[i-1];
+    }
+  }
+  return 0;
 }
 
 /* Merge two strictly decreasing arrays of Terms

@@ -124,7 +124,7 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
 
 /** Allocate or reallocate memory for a Polynomial with specified maximum size.
  *
- * Sets num_terms to 0 and ensure that there is enough memory for up to "size" 
+ * Sets num_terms to 0 and ensure that there is enough memory for up to "size"
  * terms and coefficients.  These arrays are enlarged with realloc if necessary.
  *
  * Note that allocation and deallocation of Polynomial_s structs is not
@@ -205,33 +205,28 @@ void Poly_print(Polynomial_t* P, int rank) {
  */
 
 static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
-  int result;
-  /* First deal with the case where one or both Polynomials is 0 (with NULL pointers).*/
-   if (P->num_terms == 0) {
-    if (Q->num_terms != 0) {
-      return 1;
+  if (P->num_terms > 0 && Q->num_terms > 0) {
+    int P_index = P->coefficients[p].column_index;
+    int Q_index = Q->coefficients[q].column_index;
+    if (P_index >= 0 && Q_index >= 0) {
+      /* If both column indexes are non-negative, use them for the comparison. */
+      return P_index - Q_index;
     } else {
-      return 0;
+      /* Otherwise do the comparison from scratch. */
+      Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
+      int td1, td2, td_cmp;
+      td1 = Term_total_degree(P_term, P->rank);
+      td2 = Term_total_degree(Q_term, Q->rank);
+      td_cmp = td1 - td2;
+      return td_cmp == 0 ? Term_revlex_diff(Q_term, P_term, P->rank) : td_cmp;
     }
-  }
-  if (Q->num_terms == 0) {
-    return -1;
-  }
-  int P_index = P->coefficients[p].column_index;
-  int Q_index = Q->coefficients[q].column_index;
-  if (P_index >= 0 && Q_index >= 0) {
-    /* If both column indexes are non-negative, use them for the comparison. */
-    result = P_index - Q_index;
+  } else if (P->num_terms == 0 && Q->num_terms == 0) {
+    return 0;
+  } else if (P->num_terms == 0) {
+    return 1;
   } else {
-    /* Otherwise do the comparison from scratch. */
-    Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
-    int td1, td2, td_cmp;
-    td1 = Term_total_degree(P_term, P->rank);
-    td2 = Term_total_degree(Q_term, Q->rank);
-    td_cmp = td1 - td2;
-    result = td_cmp == 0 ? Term_revlex_diff(Q_term, P_term, P->rank) : td_cmp;
-  }
-  return result;
+      return -1;
+    }
 }
 
 /** Static function to compute P + a*Q for an int a.
@@ -284,17 +279,6 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
   }
   answer->num_terms = N;
   answer->rank = rank;
-  /*
-   * It's not completely clear whether this is a good idea. It often won't save
-   * much memory and could conceivably cause fragmentation or waste time.  But
-   * it does free everything when the answer is 0, at least on linux.
-   */
-  /* answer->terms = realloc((void*)answer->terms, sizeof(Term_t)*N); */
-  /* answer->coefficients = realloc((void*)answer->coefficients, sizeof(coeff_t)*N); */
-  /* if ((answer->terms == NULL || answer->coefficients == NULL) && N != 0) { */
-  /*     Poly_free(answer); */
-  /*     return false; */
-  /*   } */
   return true;
 }
 
@@ -480,23 +464,20 @@ Polynomial_t zero = {.num_terms = 0, .max_size = 0, .terms = NULL, .coefficients
  * have the same head term, this operation may not produce a monic result, so
  * we then divide g - a*f by its leading coefficient.
  */
-static inline bool row_op(Polynomial_t *f, Polynomial_t *g, int g_coeff, int prime, int rank) {
-  Polynomial_t new_row = zero;
+static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer,
+                          int g_coeff, int prime, int rank) {
   /* The coefficient should have been normalized to lie in [0, p).*/
   int a = prime - g_coeff;
-  if (! Poly_p_plus_aq(g, a, f, &new_row, prime, rank)) {
+  if (! Poly_p_plus_aq(g, a, f, answer, prime, rank)) {
     return false;
   }
-  if (new_row.coefficients != NULL && new_row.coefficients[0].value != 1) {
-    int a_inverse = inverse_mod(prime, new_row.coefficients[0].value);
-    for (int n = 0; n < new_row.num_terms; n++) {
-      int coeff = new_row.coefficients[n].value;
-      new_row.coefficients[n].value = multiply_mod(prime, a_inverse, coeff);
+  if (answer->coefficients != NULL && answer->coefficients[0].value != 1) {
+    int a_inverse = inverse_mod(prime, answer->coefficients[0].value);
+    for (int n = 0; n < answer->num_terms; n++) {
+      int coeff = answer->coefficients[n].value;
+      answer->coefficients[n].value = multiply_mod(prime, a_inverse, coeff);
     }
   }
-  /* FIX ME */
-  Poly_free(g);
-  *g = new_row;
   return true;
 }
 
@@ -532,7 +513,7 @@ void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
 
 static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
 			       monomial_array_t *answer, int rank) {
-  int size = M0.size + M1.size, p = 0, q = 0, N = 0, td0, td1;
+  int size = M0.size + M1.size, p = 0, q = 0, N = 0, td_cmp, revlex_cmp;
   monomial_array_t merged;
   merged.monomials = (monomial_t*)malloc(sizeof(monomial_t)*size);
   if (merged.monomials == NULL) {
@@ -541,11 +522,13 @@ static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
     return false;
   }
   while (p < M0.size && q < M1.size) {
-    Term_t *T0 = M0.monomials[p].term, *T1 = M1.monomials [q].term;
-    td0 = Term_total_degree(T0, rank);
-    td1 = Term_total_degree(T1, rank);
-    int td_cmp = td0 - td1;
-    int revlex_cmp = td_cmp == 0 ? Term_revlex_diff(T1, T0, rank) : 0;
+    td_cmp = M0.monomials[p].total_degree - M1.monomials[q].total_degree;
+    if (td_cmp == 0) {
+        Term_t *T0 = M0.monomials[p].term, *T1 = M1.monomials [q].term;
+        revlex_cmp = Term_revlex_diff(T1, T0, rank);
+    } else {
+      revlex_cmp = 0;
+    }
     if (td_cmp > 0 || revlex_cmp > 0) {
       /* M0[p] > M1[q] */
       merged.monomials[N++] = M0.monomials[p++];
@@ -621,7 +604,7 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
 
 static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
                              Polynomial_t *matrix, int prime, int rank) {
-  int num_monomials = 0, i, j, index, size;
+  int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
   for (i = 0; i < num_rows; i++) {
@@ -639,6 +622,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
   }
   for (i = 0; i < num_rows; i ++) {
     for (j = 0; j < P[i]->num_terms; j++){
+      monomial_arrays[i].monomials[j].total_degree = Term_total_degree(P[i]->terms + j, rank);
       monomial_arrays[i].monomials[j].term = P[i]->terms + j;
       monomial_arrays[i].monomials[j].coefficient = P[i]->coefficients + j;
     }
@@ -655,12 +639,11 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
     }
   }
   *num_columns = index;
-  size = index;
   free(merged.monomials);
   free(pool);
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero;
-    if (!Poly_alloc(matrix + i, size, rank)) {
+    if (!Poly_alloc(matrix + i, index, rank)) {
       for (j = 0; j < i; j++) {
         Poly_free(matrix + i);
         return false;
@@ -705,12 +688,17 @@ static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
  * leading term occurs in exactly one row.
  */
 
-bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
+bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num_columns,
                   int prime, int rank) {
-  int i, j, coeff, num_columns;
+  int i, j, coeff;
   Polynomial_t *row_i, *row_j;
+  Polynomial_t buffer = zero, tmp;
   int head;
-  if (!Poly_matrix_init(P, num_rows, &num_columns, answer, prime, rank)) {
+  if (!Poly_matrix_init(P, num_rows, num_columns, answer, prime, rank)) {
+    // free stuff ...
+    return false;
+  }
+  if (!Poly_alloc(&buffer, *num_columns, rank)) {
     // free stuff ...
     return false;
   }
@@ -732,21 +720,28 @@ bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows,
       row_j = answer + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, row_j, coeff, prime, rank)) {
+        if (! row_op(row_i, row_j, &buffer, coeff, prime, rank)) {
           return false;
         }
+        tmp = answer[j];
+        answer[j] = buffer;
+        buffer = tmp;
       }
     }
   }
+  Poly_free(&buffer);
   /*
    * While we are here in C land, lets sort the result by decreasing head term.
    */
   qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads_dec);
   /*
-   * Unset the column indexes to avoid confusion when using the rows later.
+   * Free unneeded memory and unset the column indexes so they don't cause
+   * confusion when using the rows later.
    */
   for (i = 0; i < num_rows; i++) {
     row_i = answer + i;
+    row_i->terms = realloc(row_i->terms, sizeof(Term_t)*row_i->num_terms);
+    row_i->coefficients = realloc(row_i->coefficients, sizeof(coeff_t)*row_i->num_terms);
     if (row_i->num_terms == 0) continue;
     for (j = 0; j <  row_i->num_terms;  j++) {
       row_i->coefficients[j].column_index = INDEX_UNSET;

@@ -1,7 +1,7 @@
 /*   This file is part of the program Snaffour.
  *
  *   Copyright (C) 2018 by Marc Culler, Nathan Dunfield, Matthias Görner
- *   and others. 
+ *   and others.
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  *   Author homepage: http://dunfield.info
  *   Author homepage: http://www.unhyperbolic.org/
  */
-  
+
 #ifndef F_FOUR_H
 
 #include <stdio.h>
@@ -35,7 +35,7 @@
  * Assigning the vector_size attribute enables gcc to use the 128-bit SSE
  * MMX registers to do arithmetic operations on all 16 bytes in a single
  * instruction.  This is meant to optimize operations such as multiplying
- * or dividing Terms. 
+ * or dividing Terms.
  */
 
 typedef char Term16_t __attribute__ ((vector_size (16)));
@@ -85,6 +85,7 @@ typedef struct coeff_s {
 } coeff_t;
 
 typedef struct monomial_s {
+  int total_degree;
   Term_t* term;
   coeff_t* coefficient;
 } monomial_t;
@@ -93,11 +94,11 @@ typedef struct monomial_array_s {
   int size;
   monomial_t* monomials;
 } monomial_array_t;
-  
+
 int inverse_mod(int p, int x);
 
 /** Polynomials
- * 
+ *
  * We use separate arrays for terms and coefficients to avoid wasting memory
  * because the terms must be aligned to 16 bytes, while the coefficients are
  * only 8 bytes each.
@@ -144,20 +145,15 @@ bool Poly_equals(Polynomial_t* P, Polynomial_t *Q);
 bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank);
-bool Poly_make_row(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
-void Poly_make_monic(Polynomial_t *P, int prime, int rank);
-bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows, int prime, int rank);
-bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank);
-bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank);
-void Poly_sort(Polynomial_t *P, int num_polys, bool increasing);
-bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size, int rank);
+bool Poly_make_row(Polynomial_t* P, Term_t* t, Polynomial_t* answer, int prime, int rank);
+void Poly_make_monic(Polynomial_t* P, int prime, int rank);
+bool Poly_echelon(Polynomial_t** P, Polynomial_t *answer, int num_rows, int *num_columns,
+                  int prime, int rank);
+bool Poly_times_term(Polynomial_t *P, Term_t* t, Polynomial_t* answer, int prime, int rank);
+bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int rank);
+void Poly_sort(Polynomial_t* P, int num_polys, bool increasing);
+bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size, int rank);
 int Poly_column_index(Polynomial_t* P, Term_t* t, int rank);
-
-/*
- * In Poly_echelon, rows of the matrix are initially allocated with a maximum size equal to
- * POLY_SIZE_FACTOR * (number of columns)
- */
-#define POLY_SIZE_FACTOR 0.5
 
 #define F_FOUR_H
 #endif

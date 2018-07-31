@@ -59,6 +59,7 @@ cdef extern from "F4.h":
 
     cdef struct Polynomial_s:
         int num_terms
+        int max_size
         int rank
         coeff_t* coefficients
         Term_t* terms
@@ -72,16 +73,16 @@ cdef extern from "F4.h":
     cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank)
-    cdef void Poly_make_monic(Polynomial_t *P, int prime, int rank)
-    cdef bool Poly_echelon(Polynomial_t **P, Polynomial_t *answer, int num_rows, int prime,
-                           int rank)
-    cdef bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime, int rank)
-    cdef bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank)
-    cdef void Poly_sort(Polynomial_t *P, int num_polys, bool increasing)
-    cdef bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size,
+    cdef void Poly_make_monic(Polynomial_t* P, int prime, int rank)
+    cdef bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num_columns,
+                           int prime, int rank)
+    cdef bool Poly_times_term(Polynomial_t* P, Term_t* t, Polynomial_t* answer, int prime, int rank)
+    cdef bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int rank)
+    cdef void Poly_sort(Polynomial_t* P, int num_polys, bool increasing)
+    cdef bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size,
                          int rank);
     cdef int Poly_column_index(Polynomial_t* P, Term_t* t, int rank)
-    
+
 cdef extern from "Python.h":
     pass
 
@@ -178,7 +179,6 @@ cdef class Term(object):
         self.c_term = <Term_t*>malloc(sizeof(Term_t))
 
     def __dealloc__(self):
-        #print('Term dealloc')
         if self.c_term is not NULL:
             free(<void*>self.c_term)
 
@@ -414,11 +414,11 @@ cdef class Polynomial(object):
 
     def __cinit__(self):
         self.c_poly.num_terms = 0
+        self.c_poly.max_size = 0
         self.c_poly.terms = NULL
         self.c_poly.coefficients = NULL
 
     def __dealloc__(self):
-        #print('Polynomial dealloc')
         Poly_free(&self.c_poly)
 
     def __init__(self, *args, PolyRing ring=no_ring):
@@ -579,7 +579,7 @@ cdef class Polynomial(object):
 
     def column_index(self, Term t):
         return Poly_column_index(&self.c_poly, t.c_term, self.ring.rank)
-        
+
 cdef class Pair:
     """
     A "critical pair" consisting of two polynomials which can be combined to
@@ -637,8 +637,9 @@ cdef class PolyMatrix(object):
     """
     cdef public PolyRing ring
     cdef public int num_rows
-    cdef public tuple rows     # The Polynomials as rows of the echelon form
-    cdef Term_t** c_heads      # The head terms, accessible from an array
+    cdef public int num_columns
+    cdef public tuple rows       # The Polynomials as rows of the echelon form
+    cdef Term_t** c_heads        # The head terms, accessible from an array
 
     def __cinit__(self, poly_list):
         cdef int N = len(poly_list)
@@ -663,7 +664,8 @@ cdef class PolyMatrix(object):
             assert isinstance(p, Polynomial)
             assert p.ring is self.ring
             polys[n] = &p.c_poly
-        if not Poly_echelon(polys, answer, N, self.ring.BIG_PRIME, self.ring.rank):
+        if not Poly_echelon(polys, answer, N, &self.num_columns,
+                            self.ring.BIG_PRIME, self.ring.rank):
             raise RuntimeError('Out of memory')
         rows = []
         m = 0
@@ -680,6 +682,9 @@ cdef class PolyMatrix(object):
         self.rows = tuple(rows)
         free(answer)
         free(polys)
+
+    def size(self):
+        return (self.num_rows, self.num_columns)
 
 cdef class F4State(object):
     """
@@ -704,7 +709,7 @@ cdef class Ideal(object):
     cdef public select
     cdef public history
 
-    def __init__(self, *args, PolyRing ring=no_ring):
+    def __init__(self, *args, PolyRing ring=no_ring, history=False):
         if ring is no_ring:
             raise ValueError('A PolyRing must be specified.')
         if args and isinstance(args[0], Iterable):
@@ -717,7 +722,8 @@ cdef class Ideal(object):
         self._groebner_basis = None
         self._reduced_groebner_basis = None
         self.select = self.normal_select
-        self.history = []
+        if history:
+            self.history = []
 
     cdef mult(self, prod):
         """
@@ -811,12 +817,14 @@ cdef class Ideal(object):
             return self._groebner_basis
         self.make_monic_generators()
         G, P = [], set()
-        self.history.append(F4State(G, P, set()))
+        if isinstance(self.history, list):
+            self.history.append(F4State(G, P, set()))
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
             Sel = self.select(P)
-            self.history.append(F4State(G, P, Sel))
+            if isinstance(self.history, list):
+                self.history.append(F4State(G, P, Sel))
             L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
             tilde_F_plus = self.reduce(L, G)
             P = P - Sel
@@ -1006,7 +1014,8 @@ cdef class Ideal(object):
                     reducer = self.mult(self.simplify(t_over_ghead, g))
                     S.append(reducer)
                     break
-        self.history[-1].S = list(S)
+        if isinstance(self.history, list):
+            self.history[-1].S = list(S)
         return S
 
     def update(self, G, P, h):
