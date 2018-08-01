@@ -1033,7 +1033,7 @@ cdef class Ideal(object):
                  not Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
                  S.extend((self.mult((t1, f1)), self.mult((t2, f2))))
              else:
-                 S.extend((self.mult(p1), self.mult(p2)))
+                 S.extend((self.mult(p1), self.mult((t2, f2))))
         tails = self.tails(S)
         for t in tails:
             for g in G:
