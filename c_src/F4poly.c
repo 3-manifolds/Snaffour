@@ -240,8 +240,8 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
 static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t* answer,
                   int prime, int rank) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
-  Term_t term;
-  coeff_t p_coeff, q_coeff;
+  coeff_t *p_coeff, *q_coeff;
+  int value;
   if (! Poly_alloc(answer, size, rank)) {
     return false;
   }
@@ -249,33 +249,39 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
     cmp = Poly_compare_terms(P, p, Q, q);
     if (cmp > 0) { /* deg P > deg Q */
       answer->terms[N] = P->terms[p];
-      answer->coefficients[N++] = P->coefficients[p++];
+      answer->coefficients[N] = P->coefficients[p];
+      N++; p++;
     } else if (cmp < 0) { /* deg P < deg Q */
+      q_coeff = Q->coefficients + q;
       answer->terms[N] = Q->terms[q];
-      q_coeff = Q->coefficients[q++];
-      q_coeff.value = multiply_mod(prime, a, q_coeff.value);
-      answer->coefficients[N++] = q_coeff;
+      value = multiply_mod(prime, a, q_coeff->value);
+      answer->coefficients[N].column_index = q_coeff->column_index;
+      answer->coefficients[N].value = value;
+      N++; q++;
     } else { /* deg P == deg Q */
-      term = P->terms[p];
-      p_coeff = P->coefficients[p++];
-      q_coeff = Q->coefficients[q++];
-      p_coeff.value = x_plus_ay_mod(prime, p_coeff.value, a, q_coeff.value);
-      if (p_coeff.value != 0) {
-        answer->terms[N] = term;
-        answer->coefficients[N++] = p_coeff;
+      p_coeff = P->coefficients + p;
+      q_coeff = Q->coefficients + q;
+      value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value);
+      if (value != 0) {
+	answer->terms[N] = P->terms[p];
+	answer->coefficients[N].column_index = p_coeff->column_index;
+	answer->coefficients[N].value = value;
+	N++;
       }
+      p++; q++;
     }
   }
   /* At most one of these two loops will be non-trivial. */
-  for (; q < Q->num_terms; q++) {
+  for (; q < Q->num_terms; q++, N++) {
     answer->terms[N] = Q->terms[q];
-    q_coeff = Q->coefficients[q];
-    q_coeff.value = multiply_mod(prime, a, q_coeff.value);
-    answer->coefficients[N++] = q_coeff;
+    q_coeff = Q->coefficients + q;
+    value = multiply_mod(prime, a, q_coeff->value);
+    answer->coefficients[N].column_index = q_coeff->column_index;
+    answer->coefficients[N].value = value;
   }
-  for (; p < P->num_terms; p++) {
+  for (; p < P->num_terms; p++, N++) {
     answer->terms[N] = P->terms[p];
-    answer->coefficients[N++] = P->coefficients[p];
+    answer->coefficients[N] = P->coefficients[p];
   }
   answer->num_terms = N;
   answer->rank = rank;
