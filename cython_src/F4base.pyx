@@ -874,8 +874,8 @@ cdef class Ideal(object):
         selected = {p for p in pairs if p.lcm.total_degree == d}
         while (len(selected) < len(pairs) and
                set((True,)) == {p.right_head.divides(p.left_head) for p in selected}):
-               d += 1
-               selected |= {p for p in pairs if p.lcm.total_degree == d}
+            d += 1
+            selected |= {p for p in pairs if p.lcm.total_degree == d}
         if self.verbosity > 0:
             print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
         return selected
@@ -1055,11 +1055,17 @@ cdef class Ideal(object):
         are added to P, then useless pairs are removed.  Elements of G whose
         head term is divisible by h are removed, and finally h is added to G.
 
+        Note that the pairs created by this method always have the new candidate
+        h on the left, so we know that the right hand polynomial was added
+        before the left (although it may have been removed by this method before
+        the pair is processed).
+
         Pseudocode for this subalgorithm is given on page 230 of "Gröbner Bases"
         by T. Becker and V. Weispfenning.
         """
-        cdef Term p_lcm, q_lcm
-        cdef Term h_head = h.head_term
+        cdef Term_t lcm
+        cdef Term_t *p_lcm, *q_lcm
+        cdef Term_t* h_head = (<Term>h.head_term).c_term
         C = sorted((Pair(h, g) for g in G), key=lambda p: p.lcm.total_degree, reverse=True)
         D, E, P_new = [], [], []
         # Discard (h, g) if its lcm is divisible by the lcm of a saved or unseen
@@ -1072,28 +1078,37 @@ cdef class Ideal(object):
             if p.is_disjoint:
                 D.append(p)
             else:
-                p_lcm = p.lcm
+                p_lcm = (<Term>p.lcm).c_term
                 useless = False
                 for q in chain(D, C):
-                    q_lcm = q.lcm
-                    if Term_divides(q_lcm.c_term, p_lcm.c_term):
+                    q_lcm = (<Term>q.lcm).c_term
+                    if Term_divides(q_lcm, p_lcm):
                         useless = True
                         break
-                    if p_lcm.total_degree < q_lcm.total_degree:
+                    if p.lcm.total_degree < q.lcm.total_degree:
                         break
                 if not useless:
                     D.append(p)
         # Now discard pairs with disjoint head terms.
         E = [p for p in D if not p.is_disjoint]
-        Eg = {p.right_poly for p in E}
         # Add pairs (f, g) in P to P_new if they do not satiisfy:
         #   * HT(h) divides lcm(f, g) and (h, f) and (h, g) are both in E.
-        P_new = [p for p in P if (not h_head.divides(p.lcm)) or
-                 (p.left_poly not in Eg) or (p.right_poly not in Eg)]
+        for p in P:
+            p_lcm = (<Term>p.lcm).c_term
+            if not Term_divides(h_head, p_lcm):
+                P_new.append(p)
+            else:    
+                Term_lcm(h_head, (<Term>p.left_head).c_term, &lcm)
+                if Term_equals(&lcm, p_lcm):
+                    P_new.append(p)
+                else:
+                    Term_lcm(h_head, (<Term>p.right_head).c_term, &lcm)
+                    if Term_equals(&lcm, p_lcm):
+                        P_new.append(p)
         # Add the pairs in E to P_new.
         P_new.extend(E)
         # Remove redundant elements of G.
-        G_new = [g for g in G if not h_head.divides(g.head_term)]
+        G_new = [g for g in G if not h.head_term.divides(g.head_term)]
         G_new.append(h)
         return G_new, set(P_new)
 
