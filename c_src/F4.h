@@ -70,7 +70,7 @@ bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
 /** Coefficients in a Polynomial.
  *
  * The coefficient also stores a column index, which is used in the echelon
- * reduction to speed up comparisons of Terms.  The indiex should be set to
+ * reduction to speed up comparisons of Terms.  The index should be set to
  * INDEX_UNSET when a coefficient is created and is reset to INDEX_UNSET after
  * computing the reduced echelon form.
  */
@@ -99,19 +99,37 @@ int inverse_mod(int p, int x);
 
 /** Polynomials
  *
- * We use separate arrays for terms and coefficients to avoid wasting memory
- * because the terms must be aligned to 16 bytes, while the coefficients are
- * only 8 bytes each.
+ * Polynomials come in two flavors.  The standard flavor has two arrays,
+ * one containing terms and one containing coefficients.  Using two arrays
+ * saves memory since a term must be stored in memory which is aligned to
+ * 16 bytes while a coefficient only occupies 8 bytes.  A struct containing
+ * a coefficient and a term would have to be padded with 8 bytes.  The
+ * second "compact" flavor saves even more memory by using an external table of
+ * terms.  The term_order element of the coefficient is an index into the
+ * external table, and the internal term pointer is NULL.  The external table
+ * can be shared among several polynomials. This is done when computing
+ * the echelon form of a "matrix" whose "rows" are Polynomials.  This saves
+ * both space and time.  The basic row operation consists primarily of copying
+ * coefficients from one row to another, based on a comparison of the associated
+ * terms. Terms can be compared by comparing their indices, which is much
+ * faster than comparing them as vectors, even with MMX instructions.  And
+ * copying 8 bytes is much faster than copying 40 bytes.
  *
+ * A Polynomial in compact form should have its terms element set to NULL and
+ * each coefficient should have a non-negative column_index.  A Polynomial in
+ * standard form should have its table element set to NULL and each column_index
+ * should be set to INDEX_UNSET.
+ * 
  * The rank indicates the number of variables, i.e. the rank of the parent ring.
  * Loops which deal with the exponents as separate bytes use this to avoid
  * iterating through the unused exponents which, incidentally, are expected to
  * all be zero.
  *
- * The array terms of Term_t types must be maintained in sorted order by
- * descendng grevlex.  Adding or subtracting two Polynomials is done by
- * interleaving the lists of terms and coefficients, and occasionally combining
- * two coefficients in the relatively rare case where a term appears in both
+ * The array terms of Term_t types, or the external table must be maintained in
+ * sorted order by descending grevlex.  This means that adding or subtracting
+ * two Polynomials is done by interleaving the lists of terms and coefficients,
+ * or just the coefficients in the compact case, and occasionally combining two
+ * coefficients in the relatively rare case where a term appears in both
  * Polynomials.  Finding the coefficient of a Term in a Polynomial is done by
  * bisection, which assumes that the term arrays be ordered.
  *
@@ -134,6 +152,7 @@ typedef struct Polynomial_s {
   int rank;               /* The number of variables in the parent polynomial ring. */
   coeff_t* coefficients;
   Term_t* terms;
+  Term_t* table;
 } Polynomial_t;
 
 bool Poly_alloc(Polynomial_t *P, int size, int rank);

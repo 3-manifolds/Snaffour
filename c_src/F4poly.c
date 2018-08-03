@@ -134,52 +134,101 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
 bool Poly_alloc(Polynomial_t* P, int size, int rank) {
   int old_size = P->max_size;
   if (size > old_size) {
-    P->terms = realloc(P->terms, sizeof(Term_t)*size);
-    if (P->terms == NULL) {
-      return false;
+    if (P->table == NULL) {
+      if (NULL == (P->terms = realloc(P->terms, sizeof(Term_t)*size))) {
+	goto oom;
+      }
     }
-    P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size);
-    if (P->coefficients == NULL) {
-      free(P->terms);
-      return false;
+    if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size))) {
+      goto oom;
     }
     P->max_size = size;
   }
   P->num_terms = 0;
   P->rank = rank;
   return true;
+
+ oom:
+  free(P->table);
+  free(P->terms);
+  free(P->coefficients);
+  return false;
 }
 
 /** Free the terms and coefficients of a Polynomial, if not NULL.
  *
  * The pointers are set to NULL after freeing the arrays and num_terms is
- * set to 0.
+ * set to 0.  The flavor does not change!
  */
 
 void Poly_free(Polynomial_t* P) {
-  if (P->terms != NULL) {
-    free(P->terms);
-  }
-  if (P->coefficients != NULL) {
-    free(P->coefficients);
-  }
+  free(P->terms);
+  free(P->coefficients);
   P->num_terms = 0;
   P->rank = 0;
   P->terms = NULL;
   P->coefficients = NULL;
 }
 
-/** Copy a Polynomial's data into another Polynomial
+/** Decompress a compact Polynomial, converting it to normal flavor.
+ */
+
+static bool Poly_decompress(Polynomial_t* P) {
+  int i;
+  if (P->num_terms > 0) {
+    P->terms = (Term_t*)malloc(P->num_terms*sizeof(Term_t));
+    if (P->terms == NULL){
+      return false;
+    }
+  }
+  for (i = 0; i < P->num_terms; i++) {
+    P->terms[i] = P->table[P->coefficients[i].column_index];
+    P->coefficients[i].column_index = INDEX_UNSET;
+  }
+  P->table = NULL;
+  return true;
+}
+
+/** Copy a Polynomial's data into another Polynomial.
+ *
+ * The src and dest must have the same flavor and, if compact,
+ * must share the same table.
  */
 void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
   int i;
-  /* First make sure there is enough room in the destinaion. */
+  /* First make sure there is enough room in the destination. */
   Poly_alloc(dest, src->num_terms, src->rank);
+  if (src->table == NULL) {
+    for (i=0; i < src->num_terms; i++) {
+      dest->terms[i] = src->terms[i];
+    }
+  }
   for (i=0; i < src->num_terms; i++) {
-    dest->terms[i] = src->terms[i];
     dest->coefficients[i] = src->coefficients[i];
   }
   dest->num_terms = src->num_terms;
+}
+
+/** Compress a Polynomial which is in transitional state.
+ *
+ * This assumes that the source is almost a Polynomial of normal
+ * flavor, but its column indexes have been set to indexes into a
+ * table containing all of its terms.  The destination should have
+ * been initialized to zero, but will be changed into a Polynomial of
+ * compact flavor.
+ */
+static bool Poly_compress(Polynomial_t* src, Polynomial_t* dest, Term_t* table) {
+  int i;
+  dest->table = table;
+  /* First make sure there is enough room in the destination. */
+  if (!Poly_alloc(dest, src->num_terms, src->rank)) {
+    return false;
+  }
+  for (i=0; i < src->num_terms; i++) {
+    dest->coefficients[i] = src->coefficients[i];
+  }
+  dest->num_terms = src->num_terms;
+  return true;
 }
 
 /** Print a Polynomial in a crude way, without variable names.
@@ -191,9 +240,13 @@ void Poly_print(Polynomial_t* P, int rank) {
   } else {
     for (int i=0; i<P->num_terms; i++) {
       printf("%d*", P->coefficients[i].value);
-      Term_print(&P->terms[i], rank);
+      if (P->table != NULL) {
+	Term_print(P->table + P->coefficients[i].column_index, rank);
+      } else {
+	Term_print(&P->terms[i], rank);
+      }
+      printf("\n");
     }
-    printf("\n");
   }
 }
 
@@ -212,7 +265,10 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
       /* If both column indexes are non-negative, use them for the comparison. */
       return P_index - Q_index;
     } else {
-      /* Otherwise do the comparison from scratch. */
+      /* 
+       * Otherwise do the comparison from scratch.
+       * This only happens for the standard flavor
+       */
       Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
       int td1, td2, td_cmp;
       td1 = Term_total_degree(P_term, P->rank);
@@ -234,6 +290,9 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
  * This is the core of the row operation used to reduce a matrix to echelon form
  * and also handles addition and subtraction (by taking a=1 or a=-1).
  *
+ * The operands must have the same flavor and, if compact, must share
+ * the same table.
+ *
  * NOTE: P and Q must point to different polynomials for this to work.
  */
 
@@ -242,18 +301,26 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
   coeff_t *p_coeff, *q_coeff;
   int value;
+  bool has_table = (P->table != NULL);
   if (! Poly_alloc(answer, size, rank)) {
     return false;
+  }
+  if (has_table) {
+    answer->table = P->table;
   }
   while (p < P->num_terms && q < Q->num_terms) {
     cmp = Poly_compare_terms(P, p, Q, q);
     if (cmp > 0) { /* deg P > deg Q */
-      answer->terms[N] = P->terms[p];
+      if (!has_table) {
+	answer->terms[N] = P->terms[p];
+      }
       answer->coefficients[N] = P->coefficients[p];
       N++; p++;
     } else if (cmp < 0) { /* deg P < deg Q */
       q_coeff = Q->coefficients + q;
-      answer->terms[N] = Q->terms[q];
+      if (!has_table) {
+	answer->terms[N] = Q->terms[q];
+      }
       value = multiply_mod(prime, a, q_coeff->value);
       answer->coefficients[N].column_index = q_coeff->column_index;
       answer->coefficients[N].value = value;
@@ -263,7 +330,9 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
       q_coeff = Q->coefficients + q;
       value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value);
       if (value != 0) {
-	answer->terms[N] = P->terms[p];
+	if (!has_table) {
+	  answer->terms[N] = P->terms[p];
+	}
 	answer->coefficients[N].column_index = p_coeff->column_index;
 	answer->coefficients[N].value = value;
 	N++;
@@ -273,14 +342,18 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
   }
   /* At most one of these two loops will be non-trivial. */
   for (; q < Q->num_terms; q++, N++) {
-    answer->terms[N] = Q->terms[q];
+    if (!has_table) {
+      answer->terms[N] = Q->terms[q];
+    }
     q_coeff = Q->coefficients + q;
     value = multiply_mod(prime, a, q_coeff->value);
     answer->coefficients[N].column_index = q_coeff->column_index;
     answer->coefficients[N].value = value;
   }
   for (; p < P->num_terms; p++, N++) {
-    answer->terms[N] = P->terms[p];
+    if (!has_table) {
+      answer->terms[N] = P->terms[p];
+    }
     answer->coefficients[N] = P->coefficients[p];
   }
   answer->num_terms = N;
@@ -290,11 +363,15 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
 
 /** Add Polynomials P and Q and store the result in answer.
  *
- * The work is done by Poly_p_plus_aq, but we need to deal with the special case
- * where P and Q are the same Polynomial.
+ * The operands must have the same flavor and, if compact, must share
+ * the same table.
+ *
+ * The work is done by Poly_p_plus_aq, but we need to deal with the
+ * special case where P and Q are the same Polynomial.
  */
 
-bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank) {
+bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
+	      int prime, int rank) {
   if (P == Q) {
     int N = 0;
     coeff_t p_coeff;
@@ -316,11 +393,15 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
 
 /** Subtract Polynomials P and Q and store the result P - Q in answer.
  *
+ * The operands must have the same flavor and, if compact, must share
+ * the same table.
+ *
  * The work is done by Poly_p_plus_aq, but we need to deal with the special case
  * where P and Q are the same Polynomial (by returning a 0 Polynomial).
  */
 
-bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank) {
+bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
+	      int prime, int rank) {
   if (P == Q) {
     answer->num_terms = 0;
     //Poly_free(answer);
@@ -329,16 +410,31 @@ bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
   return Poly_p_plus_aq(P, prime - 1, Q, answer, prime, rank);
 }
 
+/** Determine if two Polynomials are equal.
+ *
+ * The operands must have the same flavor and, if compact, must share
+ * the same table.
+ */
+
 bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
   if (P->num_terms != Q->num_terms) {
     return false;
   }
-  for (int N = 0; N < P->num_terms; N++) {
-    if (! Term_equals(P->terms + N, Q->terms + N)) {
-      return false;
+  if (P->table != NULL) {
+    for (int N = 0; N < P->num_terms; N++) {
+      if (P->coefficients[N].column_index != Q->coefficients[N].column_index || 
+	  P->coefficients[N].value != Q->coefficients[N].value) {
+	return false;
+      }
     }
-    if (P->coefficients[N].value != Q->coefficients[N].value) {
-      return false;
+  } else {
+    for (int N = 0; N < P->num_terms; N++) {
+      if (! Term_equals(P->terms + N, Q->terms + N)) {
+	return false;
+      }
+      if (P->coefficients[N].value != Q->coefficients[N].value) {
+	return false;
+      }
     }
   }
   return true;
@@ -353,8 +449,9 @@ static bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
 		      int bottom, int top, int* index) {
   int middle;
   int td;
+  Term_t *terms = P->table == NULL ? P->terms : P->table;
   if (top - bottom == 1) {
-    if (Term_equals(t, P->terms + bottom)) {
+    if (Term_equals(t, terms + bottom)) {
 	*index = bottom;
 	return true;
       } else {
@@ -362,8 +459,8 @@ static bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
       }
   }
   middle = (top + bottom) >> 1;
-  td = Term_total_degree(P->terms + middle, rank);
-  if (td < t_td || (td == t_td && Term_revlex_diff(P->terms + middle, t, rank) > 0)) {
+  td = Term_total_degree(terms + middle, rank);
+  if (td < t_td || (td == t_td && Term_revlex_diff(terms + middle, t, rank) > 0)) {
     return find_index(P, t, t_td, rank, bottom, middle, index);
   } else {
     return find_index(P, t, t_td, rank, middle, top, index);
@@ -400,6 +497,8 @@ int Poly_column_index(Polynomial_t* P, Term_t* t, int rank) {
 
 /** Multiply a Polynomial by a Term.
  *
+ * The Polynomial must have the standard flavor.
+ *
  * Much of the F4 algorithm works with "unevaluated products" (t, f) but eventually
  * they need to be evaluated.  This function does the evaluation.
  */
@@ -421,6 +520,8 @@ bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime
 }
 
 /** Multiply a Polynomial by an int.
+ *
+ *  The Polynomial must have the standard flavor.
  */
 
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank) {
@@ -486,7 +587,6 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer
   }
   return true;
 }
-
 
 /*
  * Sort an array of type Polynomial_t, in place, by head term.  Zero
@@ -609,16 +709,17 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
  */
 
 static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
-                             Polynomial_t *matrix, int prime, int rank) {
+                             Term_t **term_table, Polynomial_t *matrix,
+			     int prime, int rank) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
+  Term_t *table = NULL;
   for (i = 0; i < num_rows; i++) {
     num_monomials += P[i]->num_terms;
   }
-  pool = (monomial_t*)malloc(num_monomials*sizeof(monomial_t));
-  if (pool == NULL) {
-    return false;
+  if (NULL == (pool = (monomial_t*)malloc(num_monomials*sizeof(monomial_t)))) {
+    goto oom;
   }
   previous.size = 0; previous.monomials = pool;
   for (i = 0; i < num_rows; i++) {
@@ -634,30 +735,43 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
     }
   }
   if (! monomial_merge(monomial_arrays, num_rows, &merged, rank)) {
-    printf("merge failed!\n");
+    goto oom;
+  }
+  if (NULL == (table = (Term_t*)malloc(merged.size*sizeof(Term_t)))) {
+    goto oom;
   }
   index = 0;
   for (i = merged.size - 1; i >= 0; i--) {
     int saved_index = merged.monomials[i].coefficient->column_index;
     merged.monomials[i].coefficient->column_index = index;
     if (saved_index != DUPLICATE) {
+      table[index] = *merged.monomials[i].term;
       index++;
     }
   }
   *num_columns = index;
+  if (NULL == (table = realloc(table, index*sizeof(Term_t)))) {
+    goto oom;
+  }
+  *term_table = table;
   free(merged.monomials);
   free(pool);
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero;
-    if (!Poly_alloc(matrix + i, index, rank)) {
+    if (!Poly_compress(P[i], matrix + i, table)) {
       for (j = 0; j < i; j++) {
         Poly_free(matrix + i);
-        return false;
       }
+      goto oom;
     }
-    Poly_copy(P[i], matrix + i);
   }
   return true;
+
+ oom:
+  free(merged.monomials);
+  free(pool);
+  free(table);
+  return false;
 }
 
 /** Use bisection to find the coefficient of P with a given column index.
@@ -697,16 +811,17 @@ static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
 bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num_columns,
                   int prime, int rank) {
   int i, j, coeff;
+  Term_t* term_table = NULL;
   Polynomial_t *row_i, *row_j;
   Polynomial_t buffer = zero, tmp;
   int head;
-  if (!Poly_matrix_init(P, num_rows, num_columns, answer, prime, rank)) {
-    // free stuff ...
-    return false;
+  if (!Poly_matrix_init(P, num_rows, num_columns, &term_table, answer,
+			prime, rank)) {
+    goto oom;
   }
+  buffer.table = term_table;
   if (!Poly_alloc(&buffer, *num_columns, rank)) {
-    // free stuff ...
-    return false;
+    goto oom;
   }
   for(i = 0; i < num_rows; i++) {
     Poly_make_monic(P[i], prime, rank);
@@ -737,7 +852,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num
   }
   Poly_free(&buffer);
   /*
-   * While we are here in C land, lets sort the result by decreasing head term.
+   * While we are here in C land, let's sort the result by decreasing head term.
    */
   qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads_dec);
   /*
@@ -746,17 +861,29 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num
    */
   for (i = 0; i < num_rows; i++) {
     row_i = answer + i;
-    row_i->terms = realloc(row_i->terms, sizeof(Term_t)*row_i->num_terms);
-    row_i->coefficients = realloc(row_i->coefficients, sizeof(coeff_t)*row_i->num_terms);
-    if (row_i->num_terms == 0) continue;
-    for (j = 0; j <  row_i->num_terms;  j++) {
-      row_i->coefficients[j].column_index = INDEX_UNSET;
+    if (row_i->num_terms == 0) {
+      Poly_free(row_i);
+      continue;
+    }
+    if (!Poly_decompress(row_i)) {
+      for (j = 0; j < i; j++) {
+	Poly_free(row_i);
+	goto oom;
+      }
+    /* row_i->terms = realloc(row_i->terms, sizeof(Term_t)*row_i->num_terms); */
+    /* row_i->coefficients = realloc(row_i->coefficients, sizeof(coeff_t)*row_i->num_terms); */
+    /* for (j = 0; j <  row_i->num_terms;  j++) { */
+    /*   row_i->coefficients[j].column_index = INDEX_UNSET; */
     }
   }
+  free(term_table);
   return true;
-}
 
-// This should be constructed as part of the echelon form computation.
+ oom:
+  Poly_free(&buffer);
+  free(term_table);
+  return false;
+}
 
 /*
  * Allocate an array and fill it with all of the distinct terms, in descending

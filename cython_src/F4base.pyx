@@ -63,6 +63,7 @@ cdef extern from "F4.h":
         int rank
         coeff_t* coefficients
         Term_t* terms
+        Term_t* table
     ctypedef Polynomial_s Polynomial_t
     cdef bool Poly_alloc(Polynomial_t* P, int size, int rank)
     cdef void Poly_free(Polynomial_t* P)
@@ -421,10 +422,12 @@ cdef class Polynomial(object):
     cdef public _hash
 
     def __cinit__(self):
+        # We only use standard flavor Polynomials.
         self.c_poly.num_terms = 0
         self.c_poly.max_size = 0
-        self.c_poly.terms = NULL
         self.c_poly.coefficients = NULL
+        self.c_poly.terms = NULL
+        self.c_poly.table = NULL
 
     def __dealloc__(self):
         Poly_free(&self.c_poly)
@@ -1064,7 +1067,8 @@ cdef class Ideal(object):
         by T. Becker and V. Weispfenning.
         """
         cdef Term_t lcm
-        cdef Term_t *p_lcm, *q_lcm
+        cdef Term_t* p_lcm
+        cdef Term_t* q_lcm
         cdef Term_t* h_head = (<Term>h.head_term).c_term
         C = sorted((Pair(h, g) for g in G), key=lambda p: p.lcm.total_degree, reverse=True)
         D, E, P_new = [], [], []
