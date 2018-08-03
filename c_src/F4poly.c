@@ -300,7 +300,7 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
                   int prime, int rank) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
   coeff_t *p_coeff, *q_coeff;
-  int value;
+  int new_value;
   bool has_table = (P->table != NULL);
   if (! Poly_alloc(answer, size, rank)) {
     return false;
@@ -317,24 +317,24 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
       answer->coefficients[N] = P->coefficients[p];
       N++; p++;
     } else if (cmp < 0) { /* deg P < deg Q */
-      q_coeff = Q->coefficients + q;
       if (!has_table) {
 	answer->terms[N] = Q->terms[q];
       }
-      value = multiply_mod(prime, a, q_coeff->value);
+      q_coeff = Q->coefficients + q;
+      new_value = multiply_mod(prime, a, q_coeff->value);
       answer->coefficients[N].column_index = q_coeff->column_index;
-      answer->coefficients[N].value = value;
+      answer->coefficients[N].value = new_value;
       N++; q++;
     } else { /* deg P == deg Q */
       p_coeff = P->coefficients + p;
       q_coeff = Q->coefficients + q;
-      value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value);
-      if (value != 0) {
+      new_value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value);
+      if (new_value != 0) {
 	if (!has_table) {
 	  answer->terms[N] = P->terms[p];
 	}
 	answer->coefficients[N].column_index = p_coeff->column_index;
-	answer->coefficients[N].value = value;
+	answer->coefficients[N].value = new_value;
 	N++;
       }
       p++; q++;
@@ -346,9 +346,9 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
       answer->terms[N] = Q->terms[q];
     }
     q_coeff = Q->coefficients + q;
-    value = multiply_mod(prime, a, q_coeff->value);
+    new_value = multiply_mod(prime, a, q_coeff->value);
     answer->coefficients[N].column_index = q_coeff->column_index;
-    answer->coefficients[N].value = value;
+    answer->coefficients[N].value = new_value;
   }
   for (; p < P->num_terms; p++, N++) {
     if (!has_table) {
@@ -541,11 +541,9 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
   return true;
 }
 
-/** Divide a polynomial by the head coefficient.
+/** Divide a polynomial by its head coefficient.
  *
- * If the pointers P and answer are not identical, new terms and coefficient
- * arrays are allocated for the answer.  Otherwise, the coefficients of P
- * are modified in place.
+ * The coefficients of P are modified in place.
  */
 
 void Poly_make_monic(Polynomial_t *P, int prime, int rank) {
@@ -562,14 +560,15 @@ Polynomial_t zero = {.num_terms = 0, .max_size = 0, .terms = NULL, .coefficients
 
 /** The basic row operation
  *
- * Assume that f and g are both non-zero and have the same leading term.
- * Kill a term of g by subtracting an integer multiple of f.
+ * Assume that f and g are both non-zero, that f is monic, and that the head term of
+ * f appears in g.  Kill that term of g by subtracting a scalar multiple of f.
  *
  * First subtract a*f from g where a is the coefficient in g of the head term of
- * f.  We assume that f is monic here, so after this row op, the new value of g
- * will not have a term equal to the head term of f.  In the case where f and g
- * have the same head term, this operation may not produce a monic result, so
- * we then divide g - a*f by its leading coefficient.
+ * f.  Since f is monic, after this subtraction, the result will not have a term
+ * equal to the head term of f.  However, in the case where the cancelled term
+ * is the head term of g, i.e. f and g have the same head term, this operation
+ * may not produce a monic result. So in that case we then divide g - a*f by its
+ * leading coefficient.
  */
 static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer,
                           int g_coeff, int prime, int rank) {
@@ -589,8 +588,8 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer
 }
 
 /*
- * Sort an array of type Polynomial_t, in place, by head term.  Zero
- * polynomials go to the end;
+ * Sort an array of type Polynomial_t, in place, by head term.  Zero polynomials
+ * go to the end;
  *
  */
 
@@ -697,15 +696,13 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
 /* Initialize a matrix
  *
  * Inputs an array P of polynomial pointers.  Sorts all of the terms which
- * appear in any of the polynomials and uses the sort position to set the
- * column_index field of each coefficient.  The purpose of this is to speed up
- * comparisons during the row operations.  (When the column_index values are
- * non-negative they are used for comparisons instead of the more expensive
- * comparison of total orders and lex ordering of exponents.  Negative values
- * serve as flags.)
+ * appear in any of the polynomials and uses their sort position to set the
+ * column_index field of each coefficient.  This prepares the polynomials for
+ * conversion to the compact flavor, which is then carried out.
  *
  * The number of columns in the matrix having the input polynomials as its rows
- * is stored in the int referenced by num_columns.
+ * is stored in the int referenced by the num_columns input, and the table of
+ * all terms is stored in the term_table input.
  */
 
 static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
@@ -856,8 +853,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num
    */
   qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads_dec);
   /*
-   * Free unneeded memory and unset the column indexes so they don't cause
-   * confusion when using the rows later.
+   * Free unneeded memory and convert the row polynomials back to standard flavor.
    */
   for (i = 0; i < num_rows; i++) {
     row_i = answer + i;
@@ -870,10 +866,6 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num
 	Poly_free(row_i);
 	goto oom;
       }
-    /* row_i->terms = realloc(row_i->terms, sizeof(Term_t)*row_i->num_terms); */
-    /* row_i->coefficients = realloc(row_i->coefficients, sizeof(coeff_t)*row_i->num_terms); */
-    /* for (j = 0; j <  row_i->num_terms;  j++) { */
-    /*   row_i->coefficients[j].column_index = INDEX_UNSET; */
     }
   }
   free(term_table);
