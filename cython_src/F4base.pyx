@@ -953,8 +953,7 @@ cdef class Ideal(object):
         for p1, p2 in zip(*L):
              t1, f1 = self.simplify(p1[0], p1[1])
              t2, f2 = self.simplify(p2[0], p2[1])
-             if (not Term_equals(t1.c_term, t2.c_term) or
-                 not Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
+             if not Poly_equals(&f1.c_poly, &f2.c_poly):
                  S.extend((self.mult((t1, f1)), self.mult((t2, f2))))
              else:
                  S.extend((self.mult(p1), self.mult((t2, f2))))
