@@ -28,8 +28,8 @@
 from __future__ import print_function
 from collections import Iterable, Mapping
 from itertools import combinations, chain
-from libc.stdlib cimport malloc, free
 from libc.stdint cimport int64_t
+from cpython.mem cimport PyMem_Malloc as malloc, PyMem_Realloc as realloc, PyMem_Free as free
 import re
 
 cdef extern from "F4.h":
@@ -65,6 +65,7 @@ cdef extern from "F4.h":
         Term_t* terms
         Term_t* table
     ctypedef Polynomial_s Polynomial_t
+
     cdef bool Poly_alloc(Polynomial_t* P, int size, int rank)
     cdef void Poly_free(Polynomial_t* P)
     cdef void Poly_copy(Polynomial_t* src, Polynomial_t* dest)
@@ -650,7 +651,7 @@ cdef class PolyMatrix(object):
     cdef public int num_rows
     cdef public int num_columns
     cdef public tuple rows       # The Polynomials as rows of the echelon form
-    cdef Term_t** c_heads        # The head terms, accessible from an array
+    cdef Term_t** c_heads        # The head terms, accessible as a C array
 
     def __cinit__(self, poly_list):
         cdef int N = len(poly_list)
@@ -680,8 +681,9 @@ cdef class PolyMatrix(object):
             raise RuntimeError('Out of memory')
         rows = []
         m = 0
+        # Construct the list of rows
         for n in range(N):
-            c_poly = answer[n]  # Copies the Polynomial_t, so we can free answer
+            c_poly = answer[n]
             if c_poly.num_terms > 0:
                 self.c_heads[m] = c_poly.terms
                 f = Polynomial(ring=self.ring)
@@ -694,6 +696,7 @@ cdef class PolyMatrix(object):
         free(answer)
         free(polys)
 
+    @property
     def size(self):
         return (self.num_rows, self.num_columns)
 
@@ -703,11 +706,11 @@ cdef class F4State(object):
     """
     cdef public G
     cdef public P
-    cdef public Sel
+    cdef public selected
     cdef public S
 
-    def __init__(self, G, P, Sel):
-        self.G, self.P, self.Sel, self.S = list(G), set(P), set(Sel), []
+    def __init__(self, G, P, selected):
+        self.G, self.P, self.selected, self.S = list(G), set(P), set(selected), []
 
 cdef class Ideal(object):
     cdef public generators
@@ -833,55 +836,16 @@ cdef class Ideal(object):
         for f in self.monic_generators:
             G, P = self.update(G, P, f)
         while P:
-            Sel = self.select(P)
+            selected = self.select(P)
             if self.verbosity > 1:
-                self.history.append(F4State(G, P, Sel))
-            L = ([p.left_prod() for p in Sel], [p.right_prod() for p in Sel])
-            tilde_F_plus = self.reduce(L, G)
-            P = P - Sel
-            for h in tilde_F_plus:
+                self.history.append(F4State(G, P, selected))
+            L = ([p.left_prod() for p in selected], [p.right_prod() for p in selected])
+            new_generators = self.reduce(L, G)
+            P = P - selected
+            for h in new_generators:
                 G, P = self.update(G, P, h)
         self._groebner_basis = G
         return G
-
-    def id_select(self, pairs):
-        """
-        The identity selector.
-        """
-        return set(pairs)
-
-    def buchberger_select(self, pairs):
-        """
-        Select a single pair.  This converts F4 into the Buchberger algorithm.
-        """
-        for p in pairs:
-            return set((p,))
-        # This variant works better, it seems.
-        #s = sorted(pairs, key=lambda p: p.lcm.total_degree)
-        #return set((s[0],))
-
-    def normal_select(self, pairs):
-        """
-        Faugère's normal selector, slightly modified.
-
-        Experiment shows that it sometimes happens that there are only 1 or 2
-        pairs of minimal degree, and for all of them the head term of the
-        right polynomial divides the head term of the left.  Moreover, the total
-        degree of these few pairs is the same as the previous total degree.
-
-        It is not clear where these pairs come from, but they cause wasted time.
-        So, for now, when this situation arises, we increase the cutoff degree until
-        we find more interesting pairs.
-        """
-        d = min(p.lcm.total_degree for p in pairs)
-        selected = {p for p in pairs if p.lcm.total_degree == d}
-        while (len(selected) < len(pairs) and
-               set((True,)) == {p.right_head.divides(p.left_head) for p in selected}):
-            d += 1
-            selected |= {p for p in pairs if p.lcm.total_degree == d}
-        if self.verbosity > 0:
-            print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
-        return selected
 
     def reduce(self, L, G):
         r"""
@@ -899,7 +863,7 @@ cdef class Ideal(object):
         SIDE EFFECTS:
           The echelon form :math:`\tilde F` is appended to self.echelons.
 
-        OUTPUT: 
+        OUTPUT:
           * Returns :math:`\tilde F^+`, the rows of the echelon form of
             :math:`F` such that the head term was not a head term in :math:`F`.  In
             particular, if :math:`(t_1, g_1)` and :Math:`(t_2, g_2)` are in
@@ -913,53 +877,10 @@ cdef class Ideal(object):
         F_ech = PolyMatrix(F)
         rows = F_ech.rows
         if self.verbosity > 0:
-            print('matrix size =', F_ech.size())
+            print('matrix size =', F_ech.size)
         self.echelons.append(F_ech)
         heads = {f.head_term for f in F}
         return [f for f in rows if f.head_term not in heads]
-
-    def terms(self, list polys):
-        """
-        Return a list of all terms that appear in the input list of Polynomials.
-        The terms will be sorted by descending degree.
-        """
-        for P in polys:
-            assert isinstance(P, Polynomial)
-            assert P.ring is self.ring, (
-                'The Polynomials must belong to the ring containing the ideal.')
-        return self.term_list(polys)
-
-    cdef term_list(self, poly_list):
-        cdef Term_t *terms
-        cdef int i, num_terms
-        cdef int rank = self.ring.rank
-        cdef Term t
-        cdef Polynomial P
-        cdef Polynomial_t* polys = <Polynomial_t*>malloc(
-            len(poly_list)*sizeof(Polynomial_t))
-        for i, P in enumerate(poly_list):
-            polys[i] = P.c_poly
-        if not Poly_terms(polys, len(poly_list), &terms, &num_terms, rank):
-            raise RuntimeError('Out of memory!')
-        result = []
-        for i in range(num_terms):
-            t = Term(ring=self.ring)
-            t.c_term[0] = terms[i]
-            t.total_degree = Term_total_degree(t.c_term, rank)
-            result.append(t)
-        free(terms)
-        free(polys)
-        return result
-
-    cdef tails(self, list F):
-        """
-        Return a list of all terms which appear in one of the Polynomials in
-        F, but do not appear as a head term of any of those Polynomials.
-        The list is sorted by descending degree to make divisibility testing
-        easier.
-        """
-        heads = {f.head_term for f in F}
-        return tuple(t for t in self.term_list(F) if t not in heads)
 
     def preprocess(self, L, list G):
         """
@@ -1101,7 +1022,7 @@ cdef class Ideal(object):
             p_lcm = (<Term>p.lcm).c_term
             if not Term_divides(h_head, p_lcm):
                 P_new.append(p)
-            else:    
+            else:
                 Term_lcm(h_head, (<Term>p.left_head).c_term, &lcm)
                 if Term_equals(&lcm, p_lcm):
                     P_new.append(p)
@@ -1118,7 +1039,8 @@ cdef class Ideal(object):
 
     def simplify(self, Term t, Polynomial q):
         r"""
-        This method is the *Simplify* subalgorithm of F4.
+        This method is the *Simplify* subalgorithm of F4.  Its effect is to reduce
+        the size and complexity of the echelon forms.
 
         INPUT:
           * t, a term
@@ -1145,7 +1067,7 @@ cdef class Ideal(object):
 
         Second, he says: ":math:`u\star f` is in :math:`F_j`" when he means
         ":math:`HT(u\star f)` is in :math:`HT(F_j)`".
-        
+
         The first typo is fixed in his 2013 slide presentation.  While the
         second typo is not fixed in the slides, his example shows that he is
         only looking at head terms (i.e. top reducibility).  As he explains in
@@ -1212,6 +1134,86 @@ cdef class Ideal(object):
                             # Recursively search for a simpler pair.
                             return self.simplify(t_over_u, f)
         return result
+
+    def id_select(self, pairs):
+        """
+        The identity selector.
+        """
+        return set(pairs)
+
+    def buchberger_select(self, pairs):
+        """
+        Select a single pair of minimal degree.  This converts F4 into the
+        Buchberger algorithm.
+        """
+        s = sorted(pairs, key=lambda p: p.lcm.total_degree)
+        return set((s[0],))
+
+    def normal_select(self, pairs):
+        """
+        Faugère's normal selector, slightly modified.
+
+        Experiment shows that it sometimes happens that there are only 1 or 2
+        pairs of minimal degree, and for all of them the head term of the
+        right polynomial divides the head term of the left.  Moreover, the total
+        degree of these few pairs is the same as the previous total degree.
+
+        It is not clear where these pairs come from, but they cause wasted time.
+        So, for now, when this situation arises, we increase the cutoff degree until
+        we find more interesting pairs.
+        """
+        d = min(p.lcm.total_degree for p in pairs)
+        selected = {p for p in pairs if p.lcm.total_degree == d}
+        while (len(selected) < len(pairs) and
+               set((True,)) == {p.right_head.divides(p.left_head) for p in selected}):
+            d += 1
+            selected |= {p for p in pairs if p.lcm.total_degree == d}
+        if self.verbosity > 0:
+            print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
+        return selected
+
+    def terms(self, list polys):
+        """
+        Return a list of all terms that appear in the input list of Polynomials.
+        The terms will be sorted by descending degree.
+        """
+        for P in polys:
+            assert isinstance(P, Polynomial)
+            assert P.ring is self.ring, (
+                'The Polynomials must belong to the ring containing the ideal.')
+        return self.term_list(polys)
+
+    cdef term_list(self, poly_list):
+        cdef Term_t *terms
+        cdef int i, num_terms
+        cdef int rank = self.ring.rank
+        cdef Term t
+        cdef Polynomial P
+        cdef Polynomial_t* polys = <Polynomial_t*>malloc(
+            len(poly_list)*sizeof(Polynomial_t))
+        for i, P in enumerate(poly_list):
+            polys[i] = P.c_poly
+        if not Poly_terms(polys, len(poly_list), &terms, &num_terms, rank):
+            raise RuntimeError('Out of memory!')
+        result = []
+        for i in range(num_terms):
+            t = Term(ring=self.ring)
+            t.c_term[0] = terms[i]
+            t.total_degree = Term_total_degree(t.c_term, rank)
+            result.append(t)
+        free(terms)
+        free(polys)
+        return result
+
+    cdef tails(self, list F):
+        """
+        Return a list of all terms which appear in one of the Polynomials in
+        F, but do not appear as a head term of any of those Polynomials.
+        The list is sorted by descending degree to make divisibility testing
+        easier.
+        """
+        heads = {f.head_term for f in F}
+        return tuple(t for t in self.term_list(F) if t not in heads)
 
     def normal_form(self, f):
         return self._normalize(f, self.groebner_basis())

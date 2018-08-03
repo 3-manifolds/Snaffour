@@ -119,7 +119,7 @@ int inverse_mod(int p, int x);
  * each coefficient should have a non-negative column_index.  A Polynomial in
  * standard form should have its table element set to NULL and each column_index
  * should be set to INDEX_UNSET.
- * 
+ *
  * The rank indicates the number of variables, i.e. the rank of the parent ring.
  * Loops which deal with the exponents as separate bytes use this to avoid
  * iterating through the unused exponents which, incidentally, are expected to
@@ -173,6 +173,14 @@ bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int
 void Poly_sort(Polynomial_t* P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size, int rank);
 int Poly_column_index(Polynomial_t* P, Term_t* t, int rank);
+
+
+/* Use Python's memory allocation */
+#include "pymem.h"
+
+#define malloc PyMem_Malloc
+#define realloc PyMem_Realloc
+#define free PyMem_Free
 
 #define F_FOUR_H
 #endif

@@ -265,7 +265,7 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
       /* If both column indexes are non-negative, use them for the comparison. */
       return P_index - Q_index;
     } else {
-      /* 
+      /*
        * Otherwise do the comparison from scratch.
        * This only happens for the standard flavor
        */
@@ -422,7 +422,7 @@ bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
   }
   if (P->table != NULL) {
     for (int N = 0; N < P->num_terms; N++) {
-      if (P->coefficients[N].column_index != Q->coefficients[N].column_index || 
+      if (P->coefficients[N].column_index != Q->coefficients[N].column_index ||
 	  P->coefficients[N].value != Q->coefficients[N].value) {
 	return false;
       }
