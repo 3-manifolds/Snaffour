@@ -85,17 +85,34 @@ int inverse_mod(int p, int x) {
  * Be careful about overflow!
  */
 
+/** For now, this code assumes p = 2^31 - 1 */
+#define PRIME 0x7fffffff
+#define MASK  0xffffffff
+
 static inline int multiply_mod(int p, int x, int y) {
   int64_t P = (int64_t)p, X = (int64_t)x, Y = (int64_t)y, answer;
   if (x == 1) {
-    answer = Y;
-  } else if (x == -1) {
-    answer = -Y;
-  } else {
-    answer = X*Y;
+    return Y;
+  } else if (X == P - 1) {
+    return P - Y;
   }
-  answer = answer % P;
-  return (answer < 0 ? (int)(P + answer) : (int)answer);
+  answer = X*Y;
+  if (p == PRIME) {
+    /* answer = ((answer >> 32) << 1)*2^31 + (answer & mask)
+     * and 2^31 = 1 mod P.
+     */
+    if (answer >= P) {
+      answer = ((answer >> 32) << 1) + (answer & MASK);
+    }
+    /* Now answer <= 2^32, so we need at most 2 subtractions. */
+    while (answer >= P) {
+      answer -= P;
+    }
+  } else {
+    /* Presumably one should use Montgomery multiplication? */
+    answer = answer % P;
+  }
+  return (int)answer;
 }
 
 /** Compute x + ay mod p
@@ -104,17 +121,31 @@ static inline int multiply_mod(int p, int x, int y) {
  */
 
 static inline int x_plus_ay_mod(int p, int x, int a, int y) {
-  int64_t P = p, A = a, X = x, Y = y, answer;
+  int64_t P = p, X = x, Y = y, A = a, answer;
   if (a == 1) {
     answer = X + Y;
   } else if (a == p - 1) {
     answer = X - Y;
   } else {
-    answer = X + A*Y;
+    answer = A*Y;
+    if (p == PRIME) {
+      if (answer >= P) {
+	answer = ((answer >> 32) << 1) + (answer & MASK);
+      }
+      while (answer >= P) {
+	answer -= P;
+      }
+      answer += X;
+    } else {
+    /* Presumably one should use Montgomery multiplication? */
+      answer = answer % P;
+      answer += X;
+    }
   }
-  answer = answer % P;
   if (answer < 0) {
     answer += P;
+  } else if (answer >= P) {
+    answer -= P;
   }
   return (int)answer;
 }

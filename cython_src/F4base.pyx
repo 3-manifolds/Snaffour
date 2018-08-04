@@ -30,7 +30,7 @@ from collections import Iterable, Mapping
 from itertools import combinations, chain
 from libc.stdint cimport int64_t
 from cpython.mem cimport PyMem_Malloc as malloc, PyMem_Realloc as realloc, PyMem_Free as free
-import re
+import time, re
 
 cdef extern from "F4.h":
     ctypedef int bool
@@ -650,6 +650,7 @@ cdef class PolyMatrix(object):
     cdef public PolyRing ring
     cdef public int num_rows
     cdef public int num_columns
+    cdef public float elapsed
     cdef public tuple rows       # The Polynomials as rows of the echelon form
     cdef Term_t** c_heads        # The head terms, accessible as a C array
 
@@ -676,9 +677,11 @@ cdef class PolyMatrix(object):
             assert isinstance(p, Polynomial)
             assert p.ring is self.ring
             polys[n] = &p.c_poly
+        start = time.time()
         if not Poly_echelon(polys, answer, N, &self.num_columns,
                             self.ring.BIG_PRIME, self.ring.rank):
             raise RuntimeError('Out of memory')
+        self.elapsed = time.time() - start
         rows = []
         m = 0
         # Construct the list of rows
@@ -877,7 +880,7 @@ cdef class Ideal(object):
         F_ech = PolyMatrix(F)
         rows = F_ech.rows
         if self.verbosity > 0:
-            print('matrix size =', F_ech.size)
+            print('matrix size = %s; time = %.3fs'%(F_ech.size, F_ech.elapsed))
         self.echelons.append(F_ech)
         heads = {f.head_term for f in F}
         return [f for f in rows if f.head_term not in heads]

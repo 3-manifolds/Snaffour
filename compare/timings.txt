@@ -1,9 +1,12 @@
 laptop:  core-i7 dual core @ 1.80GHz with 1666MHz RAM
 desktop: core-i5 quad core @ 2.67GHz with 1333MHz RAM
 
+Field of order P = 2^31 - 1
+(Snaffour is using a specialized multiplication operation.)
+
               laptop    desktop    laptop     desktop
               Cyclic-7  Cyclic-7   Cyclic-8   Cyclic-8
 
 magma         3.32 s    5.71 s     111 s      170 s
 
-snaffour      3.39 s    4.64 s     166 s      193 s
+snaffour      3.39 s    4.12 s     166 s      177 s
