@@ -9,4 +9,4 @@ Field of order P = 2^31 - 1
 
 magma         3.32 s    5.71 s     111 s      170 s
 
-snaffour      2.34 s    3.62 s     123 s      153 s
+snaffour      2.34 s    3.38 s     123 s      146 s

@@ -102,18 +102,23 @@ int inverse_mod(int p, int x);
  * Polynomials come in two flavors.  The standard flavor has two arrays,
  * one containing terms and one containing coefficients.  Using two arrays
  * saves memory since a term must be stored in memory which is aligned to
- * 16 bytes while a coefficient only occupies 8 bytes.  A struct containing
- * a coefficient and a term would have to be padded with 8 bytes.  The
- * second "compact" flavor saves even more memory by using an external table of
- * terms.  The term_order element of the coefficient is an index into the
+ * 16 bytes while a coefficient only occupies 8 bytes.
+ *
+ * The second "compact" flavor saves even more memory by using an external table
+ * of terms.  The term_order element of the coefficient is an index into the
  * external table, and the internal term pointer is NULL.  The external table
- * can be shared among several polynomials. This is done when computing
- * the echelon form of a "matrix" whose "rows" are Polynomials.  This saves
- * both space and time.  The basic row operation consists primarily of copying
+ * can be shared among several polynomials. This is done when computing the
+ * echelon form of a "matrix" whose "rows" are Polynomials.  This saves both
+ * space and time.  The basic row operation consists primarily of copying
  * coefficients from one row to another, based on a comparison of the associated
- * terms. Terms can be compared by comparing their indices, which is much
- * faster than comparing them as vectors, even with MMX instructions.  And
- * copying 8 bytes is much faster than copying 40 bytes.
+ * terms. Terms can be compared by comparing their indices, which is much faster
+ * than comparing them as vectors, even with MMX instructions.  And copying 8
+ * bytes is much faster than copying 40 bytes.  The compact flavor also saves
+ * time by storing the values of the coefficients in their Montgomery
+ * representation, which allows fast reduction of products mod P.  This is
+ * important because the other major component of the basic row operation
+ * row_i -> row_i + a*row_j is that every non-zero coefficient in row_j must
+ * be multiplied by a.
  *
  * A Polynomial in compact form should have its terms element set to NULL and
  * each coefficient should have a non-negative column_index.  A Polynomial in
@@ -165,7 +170,7 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
 bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank);
 bool Poly_make_row(Polynomial_t* P, Term_t* t, Polynomial_t* answer, int prime, int rank);
-void Poly_make_monic(Polynomial_t* P, int prime, int rank);
+void Poly_make_monic(Polynomial_t* P, int prime, int rank, int neg_p_inv);
 bool Poly_echelon(Polynomial_t** P, Polynomial_t *answer, int num_rows, int *num_columns,
                   int prime, int rank);
 bool Poly_times_term(Polynomial_t *P, Term_t* t, Polynomial_t* answer, int prime, int rank);
