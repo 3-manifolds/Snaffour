@@ -80,17 +80,28 @@ int inverse_mod(int p, int x) {
   return a < 0 ? p + a : a;
 }
 
+/** We allow (odd) primes less than 2^31, so we can use a Montgomery
+ * representation with R = 2^31. A product of two Montgomery reps fits
+ * in a 64-bit int
+ */
+
 /** Multiply two numbers mod p.
  *
  * Be careful about overflow!
  */
 
-/** For now, this code assumes p = 2^31 - 1 */
+/** For now, this code assumes p = 2^31 - 1,  Since R is congruent to 1 mod p,
+ * the Montgomery representation of a is a and the multiplication operation is
+ * simpler
+ */
 #define PRIME 0x7fffffff
 #define MASK  0xffffffff
+/* For P = 2^31 - 1, the negative reciprocal of R is just 1 */
+#define NEG_RINV 1
+#define MOD_MASK 0x7fffffff
 
 static inline int multiply_mod(int p, int x, int y) {
-  int64_t P = (int64_t)p, X = (int64_t)x, Y = (int64_t)y, answer;
+  int64_t P = (int64_t)p, X = (int64_t)x, Y = (int64_t)y, answer, m;
   if (x == 1) {
     return Y;
   } else if (X == P - 1) {
@@ -98,18 +109,14 @@ static inline int multiply_mod(int p, int x, int y) {
   }
   answer = X*Y;
   if (p == PRIME) {
-    /* answer = ((answer >> 32) << 1)*2^31 + (answer & mask)
-     * and 2^31 = 1 mod P.
-     */
-    if (answer >= P) {
-      answer = ((answer >> 32) << 1) + (answer & MASK);
-    }
-    /* Now answer <= 2^32, so we need at most 2 subtractions. */
-    while (answer >= P) {
-      answer -= P;
+    //m = (((answer & MOD_MASK)*NEG_RINV) & MOD_MASK)*PRIME;
+    m = (answer & MOD_MASK)*PRIME;
+    answer = (answer + m) >> 31;
+    if (answer > PRIME) {
+      answer -= PRIME;
     }
   } else {
-    /* Presumably one should use Montgomery multiplication? */
+    /* Eventually use general Montgomery multiplication? */
     answer = answer % P;
   }
   return (int)answer;
@@ -121,7 +128,7 @@ static inline int multiply_mod(int p, int x, int y) {
  */
 
 static inline int x_plus_ay_mod(int p, int x, int a, int y) {
-  int64_t P = p, X = x, Y = y, A = a, answer;
+  int64_t P = p, X = x, Y = y, A = a, answer, m;
   if (a == 1) {
     answer = X + Y;
   } else if (a == p - 1) {
@@ -129,15 +136,15 @@ static inline int x_plus_ay_mod(int p, int x, int a, int y) {
   } else {
     answer = A*Y;
     if (p == PRIME) {
+      //m = (((answer & MOD_MASK)*NEG_RINV) & MOD_MASK)*PRIME;
+      m = (answer & MOD_MASK)*PRIME;
+      answer = (answer + m) >> 31;
       if (answer >= P) {
-	answer = ((answer >> 32) << 1) + (answer & MASK);
-      }
-      while (answer >= P) {
 	answer -= P;
       }
       answer += X;
     } else {
-    /* Presumably one should use Montgomery multiplication? */
+    /* Eventually use real Montgomery multiplication? */
       answer = answer % P;
       answer += X;
     }
