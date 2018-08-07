@@ -170,7 +170,7 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime,
 bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank);
 int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank);
 bool Poly_make_row(Polynomial_t* P, Term_t* t, Polynomial_t* answer, int prime, int rank);
-void Poly_make_monic(Polynomial_t* P, int prime, int rank, int neg_p_inv);
+void Poly_make_monic(Polynomial_t* P, int prime, int rank, int mu, int R_cubed);
 bool Poly_echelon(Polynomial_t** P, Polynomial_t *answer, int num_rows, int *num_columns,
                   int prime, int rank);
 bool Poly_times_term(Polynomial_t *P, Term_t* t, Polynomial_t* answer, int prime, int rank);

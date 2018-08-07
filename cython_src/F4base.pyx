@@ -75,7 +75,7 @@ cdef extern from "F4.h":
     cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
     cdef int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank)
-    cdef void Poly_make_monic(Polynomial_t* P, int prime, int rank, int neg_p_inv)
+    cdef void Poly_make_monic(Polynomial_t* P, int prime, int rank, int mu, int R_cubed)
     cdef bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num_columns,
                            int prime, int rank)
     cdef bool Poly_times_term(Polynomial_t* P, Term_t* t, Polynomial_t* answer, int prime, int rank)
@@ -104,6 +104,7 @@ cdef class PolyRing(object):
     cdef public variables
 
     BIG_PRIME = 2**31 - 1
+    #BIG_PRIME = 32003
     CENTER = BIG_PRIME // 2
 
     def __init__(self, *variables):
@@ -820,7 +821,7 @@ cdef class Ideal(object):
         for f in self.generators:
              g = Polynomial(ring=self.ring)
              Poly_copy(&f.c_poly, &g.c_poly)
-             Poly_make_monic(&g.c_poly, self.ring.BIG_PRIME, self.ring.rank, 0)
+             Poly_make_monic(&g.c_poly, self.ring.BIG_PRIME, self.ring.rank, 0, 0)
              g.decorate()
              self.monic_generators.append(g)
 

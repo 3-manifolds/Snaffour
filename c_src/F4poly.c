@@ -23,6 +23,7 @@
  */
 
 #include "F4.h"
+#include <assert.h>
 
 /** Struct to hold the result of an extended gcd computation.
  *
@@ -89,6 +90,7 @@ int inverse_mod(int p, int x) {
  */
 
 #define M_RADIX (1 << 31)
+#define M_RADIX64 ((int64_t)(1) << 31)
 
 /* Reducing mod R is equivalent to anding with this constant. */
 
@@ -129,22 +131,22 @@ int inverse_mod(int p, int x) {
  * multiplying by 1 converts back.
  */
 
-static inline int multiply_mod(int p, int x, int y, int mu) {
-  int64_t p64 = (int64_t)p, x64 = (int64_t)x, y64 = (int64_t)y, answer;
+static inline int multiply_mod(int prime, int x, int y, int mu) {
+  int64_t prime64 = (int64_t)prime, x64 = (int64_t)x, y64 = (int64_t)y, mu64, answer;
   if (mu != 0) {
-    int mu64 = mu;
-    answer = M_REDUCE(x64*y64, mu64, p64);
-    if (answer > p64) {
-      answer -= p64;
+    mu64 = mu;
+    answer = M_REDUCE(x64*y64, mu64, prime64);
+    if (answer > prime64) {
+      answer -= prime64;
     }
   } else { /* Not using a Montgomery representation. */
     if (x == 1) {
       return y64;
-    } else if (x64 == p64 - 1) {
-      return p64 - y64;
+    } else if (x64 == prime64 - 1) {
+      return prime64 - y64;
     }
     answer = x64*y64;
-    answer = answer % p64;
+    answer = answer % prime64;
   }
   return (int)answer;
 }
@@ -157,30 +159,30 @@ static inline int multiply_mod(int p, int x, int y, int mu) {
  * Montgomery reduction is used to compute the Montgomery representative.
  */
 
-static inline int x_plus_ay_mod(int p, int x, int a, int y, int mu) {
-  int64_t p64 = p, x64 = x, y64 = y, a64 = a, answer;
+static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
+  int64_t prime64 = prime, x64 = x, y64 = y, a64 = a, mu64, answer;
     if (mu != 0) {
-      int mu64 = mu;
-      answer = M_REDUCE(a64*y64, mu64, p64);
-      if (answer >= p64) {
-	answer -= p64;
+      mu64 = mu;
+      answer = M_REDUCE(a64*y64, mu64, prime64);
+      if (answer >= prime64) {
+	answer -= prime64;
       }
       answer += x64;
     } else {  /* Not using a Montgomery representation. */
       if (a == 1) {
 	answer = x64 + y64;
-      } else if (a == p - 1) {
+      } else if (a == prime - 1) {
 	answer = x64 - y64;
       } else {
 	answer = a64*y64;
-	answer = answer % p64;
+	answer = answer % prime64;
 	answer += x64;
       }
     }
   if (answer < 0) {
-    answer += p64;
-  } else if (answer >= p64) {
-    answer -= p64;
+    answer += prime64;
+  } else if (answer >= prime64) {
+    answer -= prime64;
   }
   return (int)answer;
 }
@@ -392,7 +394,7 @@ static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
 	answer->terms[N] = Q->terms[q];
       }
       q_coeff = Q->coefficients + q;
-      new_value = multiply_mod(prime, a, q_coeff->value, 1);
+      new_value = multiply_mod(prime, a, q_coeff->value, mu);
       answer->coefficients[N].column_index = q_coeff->column_index;
       answer->coefficients[N].value = new_value;
       N++; q++;
@@ -616,14 +618,13 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
  *
  * The coefficients of P are modified in place.
  */
-#include <assert.h>
 
-void Poly_make_monic(Polynomial_t *P, int prime, int rank, int mu) {
+void Poly_make_monic(Polynomial_t *P, int prime, int rank, int mu, int R_cubed) {
   int N = 0, a_inverse = inverse_mod(prime, P->coefficients[0].value);
-  /* WARNING: This will break for p != 2^31 - 1.
-   * We need a Montgomery inverse.
-   */
-  assert(mu == 0 || mu == 1);
+  if (mu != 0) {
+    /* Use the Montgomery inverse. */
+    a_inverse = multiply_mod(prime, a_inverse, R_cubed, mu);
+  }
   for (N=0; N < P->num_terms; N++) {
     P->coefficients[N].value = multiply_mod(prime, a_inverse,
                                             P->coefficients[N].value, mu);
@@ -651,14 +652,21 @@ Polynomial_t zero = {.num_terms = 0,
  * leading coefficient.
  */
 static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer,
-                          int g_coeff, int prime, int rank, int mu) {
+                          int g_coeff, int prime, int rank, int mu, int R_cubed,
+                          int R_mod_p) {
   /* The coefficient should have been normalized to lie in [0, p).*/
+  /* Note that p - M(X) = M(p - X) = M(-X). */
   int a = prime - g_coeff;
-  if (! Poly_p_plus_aq(g, a, f, answer, prime, rank, 1)) {
+  if (! Poly_p_plus_aq(g, a, f, answer, prime, rank, mu)) {
     return false;
   }
-  if (answer->coefficients != NULL && answer->coefficients[0].value != 1) {
+  /* Make sure the new row is monic. This is always called with non-ero mu!*/
+  if (answer->coefficients != NULL && answer->coefficients[0].value != R_mod_p) {
+    /* Use the Montgomery inverse.
+     * This does several divisions for each row op -- think about that!
+     */
     int a_inverse = inverse_mod(prime, answer->coefficients[0].value);
+    a_inverse = multiply_mod(prime, a_inverse, R_cubed, mu);
     for (int n = 0; n < answer->num_terms; n++) {
       int coeff = answer->coefficients[n].value;
       answer->coefficients[n].value = multiply_mod(prime, a_inverse, coeff, mu);
@@ -890,17 +898,32 @@ static inline bool coeff_in_column(Polynomial_t* P, int column, int bottom,
 
 bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
                   int* num_columns, int prime, int rank) {
-  int i, j, coeff, mu, R_squared;
-  int64_t prime64 = prime;
+  int i, j, coeff, mu, R_squared, R_cubed, R_mod_p;
+  int64_t prime64 = prime, radix64 = M_RADIX64, R_squared64, R_cubed64;
   Term_t* term_table = NULL;
   Polynomial_t *row_i, *row_j;
   Polynomial_t buffer = zero, tmp;
   int head;
-  /* Constants needed for the Montgomery form for R = 2^31 ... */
-  /* The negative inverse of the characteristic modulo R: */
-  mu = M_RADIX - inverse_mod(M_RADIX, prime);
-  /* The square of R mod the characteristic: */
-  R_squared = (int)((int64_t)(M_RADIX) * (int64_t)(M_RADIX) % prime64);
+  /* Compute constants needed for the Montgomery representation. */
+  /* First, mu, the negative inverse of p mod R.
+   * This seems to work, even though M_RADIX is negative as a signed int.
+   */
+  mu = inverse_mod(M_RADIX, (int)(radix64 - prime64));
+  assert(0 <= mu && mu & ~MOD_R == 0); 
+  assert((1 + ((int64_t)mu * radix64) % radix64) == 0);
+  /* R mod p, i.e. M(1) (used to check if a row is monic). */
+  R_mod_p = (int)(radix64 % prime64);
+  /* R^2 mod p (used to compute Montgomery representatives). */
+  R_squared64 = (radix64 * radix64) % prime64;
+  R_squared = (int)R_squared64;
+  assert(0 <= R_squared && R_squared < prime);
+  assert((R_squared - M_RADIX * M_RADIX) % prime == 0);
+  /* R^3 mod p (used to compute Montgomery inverses). */
+  R_cubed64 = (R_squared64 * radix64) % prime64;
+  R_cubed = (int)R_cubed64;
+  assert(0 <= R_cubed && R_cubed < prime);
+  assert((R_cubed - M_RADIX * M_RADIX * M_RADIX) % prime == 0);
+  
   if (!Poly_matrix_init(P, num_rows, num_columns, &term_table,
                         answer, prime, rank, mu, R_squared)) {
     goto oom;
@@ -910,7 +933,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     goto oom;
   }
   for(i = 0; i < num_rows; i++) {
-    Poly_make_monic(P[i], prime, rank, mu);
+    Poly_make_monic(P[i], prime, rank, mu, R_cubed);
   }
   /*
    * The best pivoting strategy I have found is to sort by increasing head term
@@ -927,7 +950,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       row_j = answer + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, row_j, &buffer, coeff, prime, rank, mu)) {
+        if (! row_op(row_i, row_j, &buffer, coeff, prime, rank, mu, R_cubed, R_mod_p)) {
           return false;
         }
         tmp = answer[j];
