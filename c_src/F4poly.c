@@ -308,10 +308,11 @@ static inline bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
  */
 
 void Poly_print(Polynomial_t* P, int rank) {
+  int i;
   if (P->num_terms == 0) {
     printf("0\n");
   } else {
-    for (int i=0; i<P->num_terms; i++) {
+    for (i=0; i<P->num_terms; i++) {
       printf("%d*", P->coefficients[i].value);
       if (P->table != NULL) {
 	Term_print(P->table + P->coefficients[i].column_index, rank);
@@ -436,8 +437,7 @@ static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
 
 /** Add Polynomials P and Q and store the result in answer.
  *
- * The operands must have the same flavor and, if compact, must share the same
- * table.
+ * The operands must have normal flavor.
  *
  * The work is done by Poly_p_plus_aq, but we need to deal with the special case
  * where P and Q are the same Polynomial.
@@ -446,7 +446,7 @@ static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
 bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
 	      int prime, int rank) {
   if (P == Q) {
-    int N = 0;
+    int N;
     coeff_t p_coeff;
     if (! Poly_alloc(answer, P->num_terms, rank)) {
       return false;
@@ -466,8 +466,7 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
 
 /** Subtract Polynomials P and Q and store the result P - Q in answer.
  *
- * The operands must have the same flavor and, if compact, must share
- * the same table.
+ * The operands must have normal flavor.
  *
  * The work is done by Poly_p_plus_aq, but we need to deal with the special case
  * where P and Q are the same Polynomial (by returning a 0 Polynomial).
@@ -477,7 +476,6 @@ bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
 	      int prime, int rank) {
   if (P == Q) {
     answer->num_terms = 0;
-    //Poly_free(answer);
     return true;
   }
   return Poly_p_plus_aq(P, prime - 1, Q, answer, prime, rank, 0);
@@ -556,6 +554,12 @@ int Poly_coeff(Polynomial_t* P, Term_t* t, int rank) {
   }
   return 0;
 }
+
+/** Return the column index of the given term in P.
+ *
+ * If P->terms does not contain the term, return 0.  This uses find_index to
+ * find the coefficient or determine that it does not exist.
+ */
 
 int Poly_column_index(Polynomial_t* P, Term_t* t, int rank) {
   int index, t_td = Term_total_degree(t, rank);
@@ -651,6 +655,7 @@ Polynomial_t zero = {.num_terms = 0,
  * may not produce a monic result. So in that case we then divide g - a*f by its
  * leading coefficient.
  */
+
 static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer,
                           int g_coeff, int prime, int rank, int mu, int R_cubed,
                           int R_mod_p) {

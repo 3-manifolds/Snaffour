@@ -1063,26 +1063,26 @@ cdef class Ideal(object):
 
         NOTE: There are three serious typos in the description of this algorithm
         in Faugère's paper.  First he says:
+
           "there exists a (unique) :math:`p` in :math:`\tilde F^+_j` such that
           :math:`HT(P) = HT(u\star f)`".
-        ..
 
         But that is absurd since :math:`HT(u\star q)` is in :math:`HT(F_j)` and
         :math:`\tilde F_j^+` is constructed by removing all elements of
-        :math:`\tilde F_j` having a head term
-        in :math:`HT(F_j)`.  He means that :math:`p` is in :math:`\tilde F_j`.
+        :math:`\tilde F_j` having a head term in :math:`HT(F_j)`.  He means that
+        :math:`p` is in :math:`\tilde F_j`.
 
         Second, he says: ":math:`u\star f` is in :math:`F_j`" when he means
         ":math:`HT(u\star f)` is in :math:`HT(F_j)`".
-
+ 
         The first typo is fixed in his 2013 slide presentation.  While the
         second typo is not fixed in the slides, his example shows that he is
         only looking at head terms (i.e. top reducibility).  As he explains in
         the slides, the goal of the simplification is to:
+
           "replace any product :math:`m\star f` by a product :math:`u\star t\star f'`
           where :math:`t\star f'` is a previously computed row and :math:`u\star t`
           divides the monomial :math:`m`"
-        ..
 
         By "previously computed row" he means a row of of an echelon form
         :math:`\tilde F_j`.  The example suggests that he means that (t, f) should be
