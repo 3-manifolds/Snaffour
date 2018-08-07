@@ -43,7 +43,7 @@ typedef struct gcd_s {
  * both 0, the result is undefined.
  */
 
-static void x_gcd(int x, int y, gcd_t* answer) {
+static inline void x_gcd(int x, int y, gcd_t* answer) {
   static int d, a, b;
   int q, r, temp;
   if (y == 0) {
@@ -66,10 +66,11 @@ static void x_gcd(int x, int y, gcd_t* answer) {
  *
  * All computations return an int value in the interval [0, p).
  * Multiplications must be done with 64-bit arithmetic to avoid overflow.
+ * We assume that p is odd.
  */
 
 
-/** Compute the inverse of a number modulo p
+/** Compute the standard representative of the inverse of x modulo p.
  */
 
 int inverse_mod(int p, int x) {
@@ -80,35 +81,59 @@ int inverse_mod(int p, int x) {
   return a < 0 ? p + a : a;
 }
 
-/** We allow (odd) primes less than 2^31, so we can use a Montgomery
- * representation with R = 2^31. A product of two Montgomery reps fits
- * in a 64-bit int
+/**
+ * When computing echelon forms over Fp, we use the Montgomery representation
+ * of a conjugacy class mod p.  Given a class X, its Montgomery representative
+ * M(X) is an element of [0, p) such that M(X) is congruent to RX mod p, where
+ * the Montgomery radix R will always be 2^31 for us.
  */
+
+#define M_RADIX (1 << 31)
+
+/* Reducing mod R is equivalent to anding with this constant. */
+
+#define MOD_R 0x7fffffff
+
+/**
+ * The distributive law implies M(X) + M(Y) = M(X+Y).  However, M(X)*M(Y) is
+ * not congruent to M(X*Y) mod p.  In fact M(X)*M(Y) = R*M(X*Y) mod p.  So
+ * computing the Montgomery representative of a product requires being able to
+ * divide by R mod p.  The point of choosing R to be a power of 2 is that this
+ * can be done without using hardware division.
+ *
+ * Given X in [0, p^2) the following macro computes an element of [0, 2p)
+ * representing X/R in Fp. It requires a precomputed constant mu in [0, p)
+ * such that mu represents -1/R in Fp.  (Hardware division can by used to
+ * compute mu, since it is only done once per echelon form.)  The macro uses 2
+ * multiplies, 2 AND operations 1 addition and a shift.  At most one extra
+ * subtraction is needed to compute the standard representative of X/R in Fp.
+ *
+ * NOTE: the arguments for the macro must be 64 bits wide to avoid overflow!!!
+ *
+ */
+
+#define M_REDUCE(X, mu, p) ((X + (((X & MOD_R)*mu) & MOD_R)*p) >> 31)
 
 /** Multiply two elements of Z/pZ.
  *
- * This works with elements in the standard representation, or in the
- * Montgomery representation.  It detects which case it is in by checking
- * the value of neg_p_inv which needs to be computed in advance and provided
- * as a parameter.  If the value is 0, the elements are standard and the
- * division algorithm is used.
+ * Arguments should be ints in the interval [0,p).
+ *
+ * Supplying a value of 0 for the reduction constant mu signals that hardware
+ * division should be used to compute the standard representative of x + ay.
+ * Otherwise, Montgomery reduction is used to compute the Montgomery
+ * representative.
  *
  * This function can also be used to convert between standard and Montgomery
- * representations.  Multiplying by R^2 mod P converts a standard element to
- * its Montgomery representation, and multiplying by 1 converts back.  Of
- * course, to do the conversions a nonzero precomputed value of neg_p_inv
- * must be provided.
+ * representations.  Multiplying by the standard representative of R^2 mod P
+ * converts a standard element to its Montgomery representation, and
+ * multiplying by 1 converts back.
  */
 
-/* Reducing mod R is equivalent to anding with this constant. */
-#define MOD_R 0x7fffffff
-
-static inline int multiply_mod(int p, int x, int y, int neg_p_inv) {
+static inline int multiply_mod(int p, int x, int y, int mu) {
   int64_t p64 = (int64_t)p, x64 = (int64_t)x, y64 = (int64_t)y, answer;
-  if (neg_p_inv != 0) {
-    int neg_p_inv64 = neg_p_inv;
-    answer = x64*y64;
-    answer = (answer + (((answer & MOD_R)*neg_p_inv64) & MOD_R)*p64) >> 31;
+  if (mu != 0) {
+    int mu64 = mu;
+    answer = M_REDUCE(x64*y64, mu64, p64);
     if (answer > p64) {
       answer -= p64;
     }
@@ -126,15 +151,17 @@ static inline int multiply_mod(int p, int x, int y, int neg_p_inv) {
 
 /** Compute x + ay mod p
  *
- * This is the scalar version of a row operation.
+ * This is the scalar version of a row operation.  Supplying a value of 0
+ * for the reduction constant mu signals that ordinary division should be
+ * used to compute the standard representative of x + ay.  Otherwise,
+ * Montgomery reduction is used to compute the Montgomery representative.
  */
 
-static inline int x_plus_ay_mod(int p, int x, int a, int y, int neg_p_inv) {
+static inline int x_plus_ay_mod(int p, int x, int a, int y, int mu) {
   int64_t p64 = p, x64 = x, y64 = y, a64 = a, answer;
-    if (neg_p_inv != 0) {
-      int neg_p_inv64 = neg_p_inv;
-      answer = a64*y64;
-      answer = (answer + (((answer & MOD_R)*neg_p_inv64) & MOD_R)*p64) >> 31;
+    if (mu != 0) {
+      int mu64 = mu;
+      answer = M_REDUCE(a64*y64, mu64, p64);
       if (answer >= p64) {
 	answer -= p64;
       }
@@ -212,7 +239,7 @@ void Poly_free(Polynomial_t* P) {
 /** Decompress a compact Polynomial, converting it to normal flavor.
  */
 
-static inline bool Poly_decompress(Polynomial_t* P, int prime, int neg_p_inv) {
+static inline bool Poly_decompress(Polynomial_t* P, int prime, int mu) {
   int i, value;
   if (P->num_terms > 0) {
     P->terms = (Term_t*)malloc(P->num_terms*sizeof(Term_t));
@@ -222,7 +249,7 @@ static inline bool Poly_decompress(Polynomial_t* P, int prime, int neg_p_inv) {
   }
   for (i = 0; i < P->num_terms; i++) {
     P->terms[i] = P->table[P->coefficients[i].column_index];
-    value = multiply_mod(prime, P->coefficients[i].value, 1, neg_p_inv);
+    value = multiply_mod(prime, P->coefficients[i].value, 1, mu);
     P->coefficients[i].column_index = INDEX_UNSET;
     P->coefficients[i].value = value;
   }
@@ -232,8 +259,8 @@ static inline bool Poly_decompress(Polynomial_t* P, int prime, int neg_p_inv) {
 
 /** Copy a Polynomial's data into another Polynomial.
  *
- * The src and dest must have the same flavor and, if compact,
- * must share the same table.
+ * The src and dest must have the same flavor and, if compact, must share the
+ * same table.
  */
 void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
   int i;
@@ -252,15 +279,13 @@ void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
 
 /** Compress a Polynomial which is in transitional state.
  *
- * This assumes that the source is almost a Polynomial of normal
- * flavor, but its column indexes have been set to indexes into a
- * table containing all of its terms.  The destination should have
- * been initialized to zero, but will be changed into a Polynomial of
- * compact flavor.
+ * This assumes that the source is almost a Polynomial of normal flavor, but
+ * its column indexes have been set to indexes into a table containing all of
+ * its terms.  The destination should have been initialized to zero, and will
+ * be changed into a Polynomial of compact flavor.
  */
 static inline bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
-                          Term_t* table, int prime, int neg_p_inv,
-                          int R_squared) {
+                          Term_t* table, int prime, int mu, int R_squared) {
   int i, value;
   dest->table = table;
   /* First make sure there is enough room in the destination. */
@@ -269,7 +294,7 @@ static inline bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
   }
   for (i=0; i < src->num_terms; i++) {
     value = src->coefficients[i].value;
-    value = multiply_mod(prime, value, R_squared, neg_p_inv);
+    value = multiply_mod(prime, value, R_squared, mu);
     dest->coefficients[i].column_index = src->coefficients[i].column_index;
     dest->coefficients[i].value = value;
   }
@@ -303,7 +328,7 @@ void Poly_print(Polynomial_t* P, int rank) {
  * they are equal.  The 0 term is considered larger than any non-zero term.
  */
 
-static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
+static inline int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
   if (P->num_terms > 0 && Q->num_terms > 0) {
     int P_index = P->coefficients[p].column_index;
     int Q_index = Q->coefficients[q].column_index;
@@ -312,8 +337,8 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
       return P_index - Q_index;
     } else {
       /*
-       * Otherwise do the comparison from scratch.
-       * This only happens for the standard flavor
+       * Otherwise do the comparison from scratch.  This only happens for the
+       * standard flavor
        */
       Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
       int td1, td2, td_cmp;
@@ -336,14 +361,14 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
  * This is the core of the row operation used to reduce a matrix to echelon form
  * and also handles addition and subtraction (by taking a=1 or a=-1).
  *
- * The operands must have the same flavor and, if compact, must share
- * the same table.
+ * The operands must have the same flavor and, if compact, must share the same
+ * table.
  *
  * NOTE: P and Q must point to different polynomials for this to work.
  */
 
-static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t* answer,
-			   int prime, int rank, int neg_p_inv) {
+static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
+                                  Polynomial_t* answer, int prime, int rank, int mu) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
   coeff_t *p_coeff, *q_coeff;
   int new_value;
@@ -374,7 +399,7 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
     } else { /* deg P == deg Q */
       p_coeff = P->coefficients + p;
       q_coeff = Q->coefficients + q;
-      new_value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value, neg_p_inv);
+      new_value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value, mu);
       if (new_value != 0) {
 	if (!has_table) {
 	  answer->terms[N] = P->terms[p];
@@ -392,7 +417,7 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
       answer->terms[N] = Q->terms[q];
     }
     q_coeff = Q->coefficients + q;
-    new_value = multiply_mod(prime, a, q_coeff->value, neg_p_inv);
+    new_value = multiply_mod(prime, a, q_coeff->value, mu);
     answer->coefficients[N].column_index = q_coeff->column_index;
     answer->coefficients[N].value = new_value;
   }
@@ -409,11 +434,11 @@ static bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q, Polynomial_t
 
 /** Add Polynomials P and Q and store the result in answer.
  *
- * The operands must have the same flavor and, if compact, must share
- * the same table.
+ * The operands must have the same flavor and, if compact, must share the same
+ * table.
  *
- * The work is done by Poly_p_plus_aq, but we need to deal with the
- * special case where P and Q are the same Polynomial.
+ * The work is done by Poly_p_plus_aq, but we need to deal with the special case
+ * where P and Q are the same Polynomial.
  */
 
 bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
@@ -491,7 +516,7 @@ bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
  * Return false if the term is not in P->terms.
  */
 
-static bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
+static inline bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
 		      int bottom, int top, int* index) {
   int middle;
   int td;
@@ -593,15 +618,15 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
  */
 #include <assert.h>
 
-void Poly_make_monic(Polynomial_t *P, int prime, int rank, int neg_p_inv) {
+void Poly_make_monic(Polynomial_t *P, int prime, int rank, int mu) {
   int N = 0, a_inverse = inverse_mod(prime, P->coefficients[0].value);
   /* WARNING: This will break for p != 2^31 - 1.
    * We need a Montgomery inverse.
    */
-  assert(neg_p_inv == 0 || neg_p_inv == 1);
+  assert(mu == 0 || mu == 1);
   for (N=0; N < P->num_terms; N++) {
     P->coefficients[N].value = multiply_mod(prime, a_inverse,
-					    P->coefficients[N].value, neg_p_inv);
+                                            P->coefficients[N].value, mu);
   }
 }
 
@@ -626,7 +651,7 @@ Polynomial_t zero = {.num_terms = 0,
  * leading coefficient.
  */
 static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer,
-                          int g_coeff, int prime, int rank, int neg_p_inv) {
+                          int g_coeff, int prime, int rank, int mu) {
   /* The coefficient should have been normalized to lie in [0, p).*/
   int a = prime - g_coeff;
   if (! Poly_p_plus_aq(g, a, f, answer, prime, rank, 1)) {
@@ -636,8 +661,7 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer
     int a_inverse = inverse_mod(prime, answer->coefficients[0].value);
     for (int n = 0; n < answer->num_terms; n++) {
       int coeff = answer->coefficients[n].value;
-      answer->coefficients[n].value = multiply_mod(prime, a_inverse, coeff,
-						   neg_p_inv);
+      answer->coefficients[n].value = multiply_mod(prime, a_inverse, coeff, mu);
     }
   }
   return true;
@@ -649,13 +673,13 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer
  *
  */
 
-static int compare_heads(const void* p1, const void* p2) {
+static inline int compare_heads(const void* p1, const void* p2) {
   Polynomial_t* P1 = (Polynomial_t*)p1;
   Polynomial_t* P2 = (Polynomial_t*)p2;
   return Poly_compare_terms(P1, 0, P2, 0);
 }
 
-static int compare_heads_dec(const void* p1, const void* p2) {
+static inline int compare_heads_dec(const void* p1, const void* p2) {
   Polynomial_t* P1 = (Polynomial_t*)p1;
   Polynomial_t* P2 = (Polynomial_t*)p2;
   return Poly_compare_terms(P2, 0, P1, 0);
@@ -719,8 +743,8 @@ static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
 /** Merge many arrays of monomials by divide and conquer.
  */
 
-static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t *answer,
-			   int rank) {
+static bool monomial_merge(monomial_array_t* M, int num_arrays,
+                           monomial_array_t *answer, int rank) {
   if (num_arrays == 1) {
     answer->monomials = (monomial_t*)malloc(M[0].size*sizeof(monomial_t));
     if (answer->monomials == NULL) {
@@ -735,6 +759,8 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
   }
   int left = num_arrays / 2, right = num_arrays - left;
   monomial_array_t left_answer, right_answer;
+  left_answer.monomials = NULL;
+  right_answer.monomials = NULL;
   bool result;
   if (! monomial_merge(M, left, &left_answer, rank)) {
     return false;
@@ -763,7 +789,7 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
 
 static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
                              Term_t **term_table, Polynomial_t *matrix,
-			     int prime, int rank, int neg_p_inv, int R_squared) {
+			     int prime, int rank, int mu, int R_squared) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
@@ -787,6 +813,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
       monomial_arrays[i].monomials[j].coefficient = P[i]->coefficients + j;
     }
   }
+  merged.monomials = NULL;
   if (! monomial_merge(monomial_arrays, num_rows, &merged, rank)) {
     goto oom;
   }
@@ -811,7 +838,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
   free(pool);
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero;
-    if (!Poly_compress(P[i], matrix + i, table, prime, neg_p_inv, R_squared)) {
+    if (!Poly_compress(P[i], matrix + i, table, prime, mu, R_squared)) {
       for (j = 0; j < i; j++) {
         Poly_free(matrix + i);
       }
@@ -833,8 +860,8 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
  * When the column indexes are available this is quite a bit faster.
  */
 
-static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
-                            int* coefficient) {
+static inline bool coeff_in_column(Polynomial_t* P, int column, int bottom,
+                                   int top, int* coefficient) {
   int middle;
   if (top - bottom == 1) {
     if (column == P->coefficients[bottom].column_index) {
@@ -863,7 +890,7 @@ static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
 
 bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
                   int* num_columns, int prime, int rank) {
-  int i, j, coeff, neg_p_inv, R_squared;
+  int i, j, coeff, mu, R_squared;
   int64_t prime64 = prime;
   Term_t* term_table = NULL;
   Polynomial_t *row_i, *row_j;
@@ -871,11 +898,11 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   int head;
   /* Constants needed for the Montgomery form for R = 2^31 ... */
   /* The negative inverse of the characteristic modulo R: */
-  neg_p_inv = (1 << 31) - inverse_mod(1 << 31, prime);
+  mu = M_RADIX - inverse_mod(M_RADIX, prime);
   /* The square of R mod the characteristic: */
-  R_squared = (int)((int64_t)(1 << 31) * (int64_t)(1 << 31) % prime64);
+  R_squared = (int)((int64_t)(M_RADIX) * (int64_t)(M_RADIX) % prime64);
   if (!Poly_matrix_init(P, num_rows, num_columns, &term_table,
-                        answer, prime, rank, neg_p_inv, R_squared)) {
+                        answer, prime, rank, mu, R_squared)) {
     goto oom;
   }
   buffer.table = term_table;
@@ -883,7 +910,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     goto oom;
   }
   for(i = 0; i < num_rows; i++) {
-    Poly_make_monic(P[i], prime, rank, neg_p_inv);
+    Poly_make_monic(P[i], prime, rank, mu);
   }
   /*
    * The best pivoting strategy I have found is to sort by increasing head term
@@ -900,7 +927,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       row_j = answer + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, row_j, &buffer, coeff, prime, rank, neg_p_inv)) {
+        if (! row_op(row_i, row_j, &buffer, coeff, prime, rank, mu)) {
           return false;
         }
         tmp = answer[j];
@@ -923,7 +950,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       Poly_free(row_i);
       continue;
     }
-    if (!Poly_decompress(row_i, prime, neg_p_inv)) {
+    if (!Poly_decompress(row_i, prime, mu)) {
       for (j = 0; j < i; j++) {
 	Poly_free(row_i);
 	goto oom;
