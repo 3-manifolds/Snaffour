@@ -85,13 +85,22 @@ int inverse_mod(int p, int x) {
  * in a 64-bit int
  */
 
-/** Multiply two numbers mod p.
+/** Multiply two elements of Z/pZ.
  *
- * Be careful about overflow!
+ * This works with elements in the standard representation, or in the
+ * Montgomery representation.  It detects which case it is in by checking
+ * the value of neg_p_inv which needs to be computed in advance and provided
+ * as a parameter.  If the value is 0, the elements are standard and the
+ * division algorithm is used.
+ *
+ * This function can also be used to convert between standard and Montgomery
+ * representations.  Multiplying by R^2 mod P converts a standard element to
+ * its Montgomery representation, and multiplying by 1 converts back.  Of
+ * course, to do the conversions a nonzero precomputed value of neg_p_inv
+ * must be provided.
  */
-#define PRIME 0x7fffffff
-/* For P = 2^31 - 1, the negative reciprocal of R is just 1 */
-#define NEG_P_INV 1
+
+/* Reducing mod R is equivalent to anding with this constant. */
 #define MOD_R 0x7fffffff
 
 static inline int multiply_mod(int p, int x, int y, int neg_p_inv) {
@@ -100,9 +109,8 @@ static inline int multiply_mod(int p, int x, int y, int neg_p_inv) {
     int neg_p_inv64 = neg_p_inv;
     answer = x64*y64;
     answer = (answer + (((answer & MOD_R)*neg_p_inv64) & MOD_R)*p64) >> 31;
-    answer = (answer + (answer & MOD_R)*p64) >> 31;
-    if (answer > PRIME) {
-      answer -= PRIME;
+    if (answer > p64) {
+      answer -= p64;
     }
   } else { /* Not using a Montgomery representation. */
     if (x == 1) {
@@ -204,9 +212,8 @@ void Poly_free(Polynomial_t* P) {
 /** Decompress a compact Polynomial, converting it to normal flavor.
  */
 
-static bool Poly_decompress(Polynomial_t* P, int prime, int R_inv) {
-  int i;
-  int64_t value64, prime64 = prime, R_inv64 = R_inv;
+static inline bool Poly_decompress(Polynomial_t* P, int prime, int neg_p_inv) {
+  int i, value;
   if (P->num_terms > 0) {
     P->terms = (Term_t*)malloc(P->num_terms*sizeof(Term_t));
     if (P->terms == NULL){
@@ -215,10 +222,9 @@ static bool Poly_decompress(Polynomial_t* P, int prime, int R_inv) {
   }
   for (i = 0; i < P->num_terms; i++) {
     P->terms[i] = P->table[P->coefficients[i].column_index];
-    value64 = P->coefficients[i].value;
-    value64 = (value64 * R_inv64) % prime64;
+    value = multiply_mod(prime, P->coefficients[i].value, 1, neg_p_inv);
     P->coefficients[i].column_index = INDEX_UNSET;
-    P->coefficients[i].value = (int)value64;
+    P->coefficients[i].value = value;
   }
   P->table = NULL;
   return true;
@@ -252,7 +258,7 @@ void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
  * been initialized to zero, but will be changed into a Polynomial of
  * compact flavor.
  */
-static bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
+static inline bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
                           Term_t* table, int prime, int neg_p_inv,
                           int R_squared) {
   int i, value;
@@ -325,7 +331,7 @@ static int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
     }
 }
 
-/** Static function to compute P + a*Q for an int a.
+/** Static function to compute P + a*Q for an element a of the coefficient field.
  *
  * This is the core of the row operation used to reduce a matrix to echelon form
  * and also handles addition and subtraction (by taking a=1 or a=-1).
@@ -857,7 +863,7 @@ static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
 
 bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
                   int* num_columns, int prime, int rank) {
-  int i, j, coeff, neg_p_inv, R_inv, R_squared;
+  int i, j, coeff, neg_p_inv, R_squared;
   int64_t prime64 = prime;
   Term_t* term_table = NULL;
   Polynomial_t *row_i, *row_j;
@@ -866,8 +872,6 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   /* Constants needed for the Montgomery form for R = 2^31 ... */
   /* The negative inverse of the characteristic modulo R: */
   neg_p_inv = (1 << 31) - inverse_mod(1 << 31, prime);
-  /* The inverse of R = 2^31 mod the characteristic: */
-  R_inv = inverse_mod(prime, (1 << 31) - prime);
   /* The square of R mod the characteristic: */
   R_squared = (int)((int64_t)(1 << 31) * (int64_t)(1 << 31) % prime64);
   if (!Poly_matrix_init(P, num_rows, num_columns, &term_table,
@@ -919,7 +923,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       Poly_free(row_i);
       continue;
     }
-    if (!Poly_decompress(row_i, prime, (int)R_inv)) {
+    if (!Poly_decompress(row_i, prime, neg_p_inv)) {
       for (j = 0; j < i; j++) {
 	Poly_free(row_i);
 	goto oom;
