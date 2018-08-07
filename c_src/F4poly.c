@@ -252,15 +252,20 @@ void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
  * been initialized to zero, but will be changed into a Polynomial of
  * compact flavor.
  */
-static bool Poly_compress(Polynomial_t* src, Polynomial_t* dest, Term_t* table) {
-  int i;
+static bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
+                          Term_t* table, int prime, int neg_p_inv,
+                          int R_squared) {
+  int i, value;
   dest->table = table;
   /* First make sure there is enough room in the destination. */
   if (!Poly_alloc(dest, src->num_terms, src->rank)) {
     return false;
   }
   for (i=0; i < src->num_terms; i++) {
-    dest->coefficients[i] = src->coefficients[i];
+    value = src->coefficients[i].value;
+    value = multiply_mod(prime, value, R_squared, neg_p_inv);
+    dest->coefficients[i].column_index = src->coefficients[i].column_index;
+    dest->coefficients[i].value = value;
   }
   dest->num_terms = src->num_terms;
   return true;
@@ -752,7 +757,7 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays, monomial_array_t
 
 static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
                              Term_t **term_table, Polynomial_t *matrix,
-			     int prime, int rank) {
+			     int prime, int rank, int neg_p_inv, int R_squared) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
@@ -800,7 +805,7 @@ static bool Poly_matrix_init(Polynomial_t **P, int num_rows, int *num_columns,
   free(pool);
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero;
-    if (!Poly_compress(P[i], matrix + i, table)) {
+    if (!Poly_compress(P[i], matrix + i, table, prime, neg_p_inv, R_squared)) {
       for (j = 0; j < i; j++) {
         Poly_free(matrix + i);
       }
@@ -850,21 +855,23 @@ static bool coeff_in_column(Polynomial_t* P, int column, int bottom, int top,
  * leading term occurs in exactly one row.
  */
 
-bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num_columns,
-                  int prime, int rank) {
-  int i, j, coeff, neg_p_inv, R_inv;
+bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
+                  int* num_columns, int prime, int rank) {
+  int i, j, coeff, neg_p_inv, R_inv, R_squared;
+  int64_t prime64 = prime;
   Term_t* term_table = NULL;
   Polynomial_t *row_i, *row_j;
   Polynomial_t buffer = zero, tmp;
   int head;
-  /* Constants needed for the Montgomery form ... */
-  /* The negative inverse of our characteristic mod R = 2^31: */
+  /* Constants needed for the Montgomery form for R = 2^31 ... */
+  /* The negative inverse of the characteristic modulo R: */
   neg_p_inv = (1 << 31) - inverse_mod(1 << 31, prime);
   /* The inverse of R = 2^31 mod the characteristic: */
   R_inv = inverse_mod(prime, (1 << 31) - prime);
-  
-  if (!Poly_matrix_init(P, num_rows, num_columns, &term_table, answer,
-			prime, rank)) {
+  /* The square of R mod the characteristic: */
+  R_squared = (int)((int64_t)(1 << 31) * (int64_t)(1 << 31) % prime64);
+  if (!Poly_matrix_init(P, num_rows, num_columns, &term_table,
+                        answer, prime, rank, neg_p_inv, R_squared)) {
     goto oom;
   }
   buffer.table = term_table;
