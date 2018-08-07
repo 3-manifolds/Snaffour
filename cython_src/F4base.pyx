@@ -22,7 +22,7 @@
 #   Author homepage: http://dunfield.info
 #   Author homepage: http://www.unhyperbolic.org/
 
-# change the next line to use cProfile
+# change the next line to use or disable cProfile
 #cython: profile=True
 
 from __future__ import print_function
@@ -102,34 +102,37 @@ cdef class PolyRing(object):
     """
     cdef public int rank
     cdef public variables
+    cdef public characteristic
+    cdef int center
 
-    BIG_PRIME = 2**31 - 1
-    #BIG_PRIME = 32003
-    CENTER = BIG_PRIME // 2
-
-    def __init__(self, *variables):
+    def __init__(self, *variables, characteristic=(2**31 - 1)):
         self.variables = tuple(variables)
         self.rank = len(self.variables)
+        self.characteristic = characteristic
+        if characteristic < 2 or characteristic >2**31 - 1:
+            raise ValueError(
+                "The characteristic must be an odd prime < 2^31 - 1")
+        self.center = characteristic // 2
 
     cpdef normalize_coeff(self, int c):
         """
         A normalized representative is in the interval [-P//2, P//2).
         This usually looks better when printing coefficients.
         """
-        # We assume c is reduced mod BIG_PRIME so it fits in an int
-        return c if c < self.CENTER else c - self.BIG_PRIME
+        # We assume c is reduced mod p, so it fits in an int.
+        return c if c < self.center else c - self.characteristic
 
     cpdef reduce_coeff(self, c):
         """Reduce mod P."""
-        return c%self.BIG_PRIME
+        return c%self.characteristic
 
     cpdef negate_coeff(self, int c):
         """Negate mod P."""
-        return self.BIG_PRIME - c
+        return self.characteristic - c
 
     cpdef invert_coeff(self, int c):
         """Compute the reciprocal mod P."""
-        return inverse_mod(self.BIG_PRIME, c);
+        return inverse_mod(self.characteristic, c);
 
     def Term(self, *args):
         return Term(*args, ring=self)
@@ -314,7 +317,7 @@ cdef class Term(object):
         """
         result = Polynomial(ring=self.ring)
         if not Poly_times_term(&other.c_poly, self.c_term, &result.c_poly,
-                        self.ring.BIG_PRIME, self.ring.rank):
+                        self.ring.characteristic, self.ring.rank):
             raise RuntimeError('Out of memory!')
         result.decorate()
         return result
@@ -489,7 +492,7 @@ cdef class Polynomial(object):
     def __add__(Polynomial self, Polynomial other):
         result = Polynomial(ring=self.ring)
         if not Poly_add(&self.c_poly, &other.c_poly, &result.c_poly,
-                        self.ring.BIG_PRIME, self.ring.rank):
+                        self.ring.characteristic, self.ring.rank):
             raise RuntimeError('Out of memory!')
         result.decorate()
         return result
@@ -497,7 +500,7 @@ cdef class Polynomial(object):
     def __sub__(Polynomial self, Polynomial other):
         result = Polynomial(ring=self.ring)
         if not Poly_sub(&self.c_poly, &other.c_poly, &result.c_poly,
-                        self.ring.BIG_PRIME, self.ring.rank):
+                        self.ring.characteristic, self.ring.rank):
             raise RuntimeError('Out of memory!')
         result.decorate()
         return result
@@ -509,22 +512,22 @@ cdef class Polynomial(object):
         cdef int a
         if isinstance(self, int):
             success = Poly_times_int(&other.c_poly, self, &result.c_poly,
-                                other.ring.BIG_PRIME, other.ring.rank)
+                                other.ring.characteristic, other.ring.rank)
         elif isinstance(self, Term):
             t = self
             success = Poly_times_term(&other.c_poly, t.c_term, &result.c_poly,
-                                other.ring.BIG_PRIME, other.ring.rank)
+                                other.ring.characteristic, other.ring.rank)
         elif isinstance(self, Monomial):
             m = self
             t = m.term
             temp = Polynomial(ring=other.ring)
             success = Poly_times_term(&other.c_poly, t.c_term, &temp.c_poly,
-                                other.ring.BIG_PRIME, other.ring.rank)
+                                other.ring.characteristic, other.ring.rank)
             if not success:
                 raise RuntimeError('Out of memory!')
             a = m.coefficient
             success = Poly_times_int(&temp.c_poly, a, &result.c_poly,
-                                other.ring.BIG_PRIME, other.ring.rank)
+                                other.ring.characteristic, other.ring.rank)
         else:
             return NotImplemented
         if not success:
@@ -680,7 +683,7 @@ cdef class PolyMatrix(object):
             polys[n] = &p.c_poly
         start = time.time()
         if not Poly_echelon(polys, answer, N, &self.num_columns,
-                            self.ring.BIG_PRIME, self.ring.rank):
+                            self.ring.characteristic, self.ring.rank):
             raise RuntimeError('Out of memory')
         self.elapsed = time.time() - start
         rows = []
@@ -752,7 +755,7 @@ cdef class Ideal(object):
         t, f = prod
         result = Polynomial(ring=self.ring)
         if not Poly_times_term(&f.c_poly, t.c_term, &result.c_poly,
-                        self.ring.BIG_PRIME, self.ring.rank):
+                        self.ring.characteristic, self.ring.rank):
             raise RuntimeError('Out of memory!')
         result.decorate()
         return result
@@ -821,7 +824,8 @@ cdef class Ideal(object):
         for f in self.generators:
              g = Polynomial(ring=self.ring)
              Poly_copy(&f.c_poly, &g.c_poly)
-             Poly_make_monic(&g.c_poly, self.ring.BIG_PRIME, self.ring.rank, 0, 0)
+             Poly_make_monic(&g.c_poly, self.ring.characteristic, self.ring.rank,
+                             0, 0)
              g.decorate()
              self.monic_generators.append(g)
 
