@@ -177,8 +177,6 @@ bool Poly_times_term(Polynomial_t *P, Term_t* t, Polynomial_t* answer, int prime
 bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int rank);
 void Poly_sort(Polynomial_t* P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size, int rank);
-int Poly_column_index(Polynomial_t* P, Term_t* t, int rank);
-
 
 /* Use Python's memory allocation */
 #include "pymem.h"

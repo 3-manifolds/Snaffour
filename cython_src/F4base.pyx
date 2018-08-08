@@ -83,7 +83,6 @@ cdef extern from "F4.h":
     cdef void Poly_sort(Polynomial_t* P, int num_polys, bool increasing)
     cdef bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size,
                          int rank);
-    cdef int Poly_column_index(Polynomial_t* P, Term_t* t, int rank)
 
 cdef extern from "Python.h":
     pass
@@ -592,9 +591,6 @@ cdef class Polynomial(object):
         3
         """
         return Poly_coeff(&self.c_poly, t.c_term, self.ring.rank)
-
-    def column_index(self, Term t):
-        return Poly_column_index(&self.c_poly, t.c_term, self.ring.rank)
 
 cdef class Pair:
     """

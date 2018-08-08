@@ -195,7 +195,7 @@ static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
 
 /** Allocate or reallocate memory for a Polynomial with specified maximum size.
  *
- * Sets num_terms to 0 and ensure that there is enough memory for up to "size"
+ * Sets num_terms to 0 and ensures that there is enough memory for up to "size"
  * terms and coefficients.  These arrays are enlarged with realloc if necessary.
  *
  * Note that allocation and deallocation of Polynomial_s structs is not
@@ -554,23 +554,6 @@ int Poly_coeff(Polynomial_t* P, Term_t* t, int rank) {
   }
   if (find_index(P, t, t_td, rank, 0, P->num_terms, &index)) {
     return P->coefficients[index].value;
-  }
-  return 0;
-}
-
-/** Return the column index of the given term in P.
- *
- * If P->terms does not contain the term, return 0.  This uses find_index to
- * find the coefficient or determine that it does not exist.
- */
-
-int Poly_column_index(Polynomial_t* P, Term_t* t, int rank) {
-  int index, t_td = Term_total_degree(t, rank);
-  if (P->num_terms == 0) {
-    return 0;
-  }
-  if (find_index(P, t, t_td, rank, 0, P->num_terms, &index)) {
-    return P->coefficients[index].column_index;
   }
   return 0;
 }
