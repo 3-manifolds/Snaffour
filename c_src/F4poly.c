@@ -373,64 +373,95 @@ static inline int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, in
  * NOTE: P and Q must point to different polynomials for this to work.
  */
 
-static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
+static inline bool Poly_p_plus_aq_normal(Polynomial_t* P, int a, Polynomial_t* Q,
                                   Polynomial_t* answer, int prime, int rank, int mu) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
-  coeff_t *p_coeff, *q_coeff;
+  coeff_t p_coeff, q_coeff;
   int new_value;
-  bool has_table = (P->table != NULL);
   if (! Poly_alloc(answer, size, rank)) {
     return false;
   }
-  if (has_table) {
-    answer->table = P->table;
-  }
+  p_coeff = P->coefficients[0];
+  q_coeff = Q->coefficients[0];
   while (p < P->num_terms && q < Q->num_terms) {
     cmp = Poly_compare_terms(P, p, Q, q);
     if (cmp > 0) { /* deg P > deg Q */
-      if (!has_table) {
-	answer->terms[N] = P->terms[p];
-      }
-      answer->coefficients[N] = P->coefficients[p];
-      N++; p++;
+      answer->terms[N] = P->terms[p];
+      answer->coefficients[N++] = p_coeff;
+      p_coeff = P->coefficients[++p];
     } else if (cmp < 0) { /* deg P < deg Q */
-      if (!has_table) {
-	answer->terms[N] = Q->terms[q];
-      }
-      q_coeff = Q->coefficients + q;
-      new_value = multiply_mod(prime, a, q_coeff->value, mu);
-      answer->coefficients[N].column_index = q_coeff->column_index;
-      answer->coefficients[N].value = new_value;
-      N++; q++;
+      answer->terms[N] = Q->terms[q];
+      new_value = multiply_mod(prime, a, q_coeff.value, mu);
+      answer->coefficients[N].column_index = q_coeff.column_index;
+      answer->coefficients[N++].value = new_value;
+      q_coeff = Q->coefficients[++q];
     } else { /* deg P == deg Q */
-      p_coeff = P->coefficients + p;
-      q_coeff = Q->coefficients + q;
-      new_value = x_plus_ay_mod(prime, p_coeff->value, a, q_coeff->value, mu);
+      new_value = x_plus_ay_mod(prime, p_coeff.value, a, q_coeff.value, mu);
       if (new_value != 0) {
-	if (!has_table) {
-	  answer->terms[N] = P->terms[p];
-	}
-	answer->coefficients[N].column_index = p_coeff->column_index;
-	answer->coefficients[N].value = new_value;
-	N++;
+	answer->terms[N] = P->terms[p];
+	answer->coefficients[N].column_index = p_coeff.column_index;
+	answer->coefficients[N++].value = new_value;
       }
-      p++; q++;
+      p_coeff = P->coefficients[++p];
+      q_coeff = Q->coefficients[++q];
     }
   }
   /* At most one of these two loops will be non-trivial. */
   for (; q < Q->num_terms; q++, N++) {
-    if (!has_table) {
-      answer->terms[N] = Q->terms[q];
-    }
-    q_coeff = Q->coefficients + q;
-    new_value = multiply_mod(prime, a, q_coeff->value, mu);
-    answer->coefficients[N].column_index = q_coeff->column_index;
+    answer->terms[N] = Q->terms[q];
+    q_coeff = Q->coefficients[q];
+    new_value = multiply_mod(prime, a, q_coeff.value, mu);
+    answer->coefficients[N].column_index = q_coeff.column_index;
     answer->coefficients[N].value = new_value;
   }
   for (; p < P->num_terms; p++, N++) {
-    if (!has_table) {
-      answer->terms[N] = P->terms[p];
+    answer->terms[N] = P->terms[p];
+    answer->coefficients[N] = P->coefficients[p];
+  }
+  answer->num_terms = N;
+  answer->rank = rank;
+  return true;
+}
+
+static inline bool Poly_p_plus_aq_compact(Polynomial_t* P, int a, Polynomial_t* Q,
+                                  Polynomial_t* answer, int prime, int rank, int mu) {
+  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
+  coeff_t p_coeff, q_coeff;
+  int new_value;
+  if (! Poly_alloc(answer, size, rank)) {
+    return false;
+  }
+  answer->table = P->table;
+  p_coeff = P->coefficients[0];
+  q_coeff = Q->coefficients[0];
+  while (p < P->num_terms && q < Q->num_terms) {
+    cmp = p_coeff.column_index - q_coeff.column_index;
+    if (cmp > 0) { /* deg P > deg Q */
+      answer->coefficients[N++] = p_coeff;
+      p_coeff = P->coefficients[++p];
+    } else if (cmp < 0) { /* deg P < deg Q */
+      new_value = multiply_mod(prime, a, q_coeff.value, mu);
+      answer->coefficients[N].column_index = q_coeff.column_index;
+      answer->coefficients[N++].value = new_value;
+      q_coeff = Q->coefficients[++q];
+    } else { /* deg P == deg Q */
+      new_value = x_plus_ay_mod(prime, p_coeff.value, a, q_coeff.value, mu);
+      if (new_value != 0) {
+	answer->coefficients[N].column_index = p_coeff.column_index;
+	answer->coefficients[N++].value = new_value;
+      }
+      p_coeff = P->coefficients[++p];
+      q_coeff = Q->coefficients[++q];
     }
+  }
+  /* At most one of these two loops will be non-trivial. */
+  for (; q < Q->num_terms; q++, N++) {
+    q_coeff = Q->coefficients[q];
+    new_value = multiply_mod(prime, a, q_coeff.value, mu);
+    answer->coefficients[N].column_index = q_coeff.column_index;
+    answer->coefficients[N].value = new_value;
+  }
+  for (; p < P->num_terms; p++, N++) {
     answer->coefficients[N] = P->coefficients[p];
   }
   answer->num_terms = N;
@@ -464,7 +495,7 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
     answer->rank = rank;
     return true;
   }
-  return Poly_p_plus_aq(P, 1, Q, answer, prime, rank, 0);
+  return Poly_p_plus_aq_normal(P, 1, Q, answer, prime, rank, 0);
 }
 
 /** Subtract Polynomials P and Q and store the result P - Q in answer.
@@ -481,7 +512,7 @@ bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
     answer->num_terms = 0;
     return true;
   }
-  return Poly_p_plus_aq(P, prime - 1, Q, answer, prime, rank, 0);
+  return Poly_p_plus_aq_normal(P, prime - 1, Q, answer, prime, rank, 0);
 }
 
 /** Determine if two Polynomials are equal.
@@ -648,7 +679,7 @@ static inline bool row_op(Polynomial_t *f, Polynomial_t *g, Polynomial_t *answer
   /* The coefficient should have been normalized to lie in [0, p).*/
   /* Note that p - M(X) = M(p - X) = M(-X). */
   int a = prime - g_coeff;
-  if (! Poly_p_plus_aq(g, a, f, answer, prime, rank, mu)) {
+  if (! Poly_p_plus_aq_compact(g, a, f, answer, prime, rank, mu)) {
     return false;
   }
   /* Make sure the new row is monic. This is always called with non-ero mu!*/
