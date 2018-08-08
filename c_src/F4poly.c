@@ -132,23 +132,26 @@ int inverse_mod(int p, int x) {
  */
 
 static inline int multiply_mod(int prime, int x, int y, int mu) {
-  int64_t prime64 = (int64_t)prime, x64 = (int64_t)x, y64 = (int64_t)y, mu64, answer;
+  int64_t prime64 = (int64_t)prime, x64 = (int64_t)x, y64 = (int64_t)y, mu64, answer64;
   if (mu != 0) {
     mu64 = mu;
-    answer = M_REDUCE(x64*y64, mu64, prime64);
-    if (answer > prime64) {
-      answer -= prime64;
+    answer64 = M_REDUCE(x64*y64, mu64, prime64);
+    /* Note: My tests indicate that this "if" is faster than:
+     * answer64 -= (~((answer64 - prime64) >> 63)) & prime64;
+     */
+    if (answer64 >= prime64) {
+      answer64 -= prime64;
     }
   } else { /* Not using a Montgomery representation. */
     if (x == 1) {
-      return y64;
+      return (int)y64;
     } else if (x64 == prime64 - 1) {
-      return prime64 - y64;
+      return (int)(prime64 - y64);
     }
-    answer = x64*y64;
-    answer = answer % prime64;
+    answer64 = x64*y64;
+    answer64 = answer64 % prime64;
   }
-  return (int)answer;
+  return (int)answer64;
 }
 
 /** Compute x + ay mod p
@@ -160,31 +163,31 @@ static inline int multiply_mod(int prime, int x, int y, int mu) {
  */
 
 static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
-  int64_t prime64 = prime, x64 = x, y64 = y, a64 = a, mu64, answer;
+  int64_t prime64 = prime, x64 = x, y64 = y, a64 = a, mu64, answer64;
     if (mu != 0) {
       mu64 = mu;
-      answer = M_REDUCE(a64*y64, mu64, prime64);
-      if (answer >= prime64) {
-	answer -= prime64;
+      answer64 = M_REDUCE(a64*y64, mu64, prime64);
+      if (answer64 >= prime64) {
+      	answer64 -= prime64;
       }
-      answer += x64;
+      answer64 += x64;
     } else {  /* Not using a Montgomery representation. */
       if (a == 1) {
-	answer = x64 + y64;
+	answer64 = x64 + y64;
       } else if (a == prime - 1) {
-	answer = x64 - y64;
+	answer64 = x64 - y64;
       } else {
-	answer = a64*y64;
-	answer = answer % prime64;
-	answer += x64;
+	answer64 = a64*y64;
+	answer64 = answer64 % prime64;
+	answer64 += x64;
       }
     }
-  if (answer < 0) {
-    answer += prime64;
-  } else if (answer >= prime64) {
-    answer -= prime64;
+  if (answer64 < 0) {
+    answer64 += prime64;
+  } else if (answer64 >= prime64) {
+    answer64 -= prime64;
   }
-  return (int)answer;
+  return (int)answer64;
 }
 
 /** \page modP Polynomials
