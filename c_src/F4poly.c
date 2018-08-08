@@ -376,10 +376,6 @@ static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
   coeff_t *p_coeff, *q_coeff;
   int new_value;
   bool has_table = (P->table != NULL);
-  /* This seems to save 5% or so. */
-  __builtin_prefetch(P->coefficients, 0);
-  __builtin_prefetch(Q->coefficients, 0);
-  __builtin_prefetch(answer->coefficients, 1);
   if (! Poly_alloc(answer, size, rank)) {
     return false;
   }
