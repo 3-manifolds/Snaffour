@@ -123,7 +123,8 @@ int inverse_mod(int p, int x) {
  * Supplying a value of 0 for the reduction constant mu signals that hardware
  * division should be used to compute the standard representative of x + ay.
  * Otherwise, Montgomery reduction is used to compute the Montgomery
- * representative.
+ * representative.  The compact version assumes mu is non-zero and expects
+ * 64 bit values for p and mu.
  *
  * This function can also be used to convert between standard and Montgomery
  * representations.  Multiplying by the standard representative of R^2 mod P
@@ -154,12 +155,23 @@ static inline int multiply_mod(int prime, int x, int y, int mu) {
   return (int)answer64;
 }
 
+static inline int compact_multiply_mod(int64_t prime64, int x, int y,
+				       int64_t mu64) {
+  int64_t x64 = (int64_t)x, y64 = (int64_t)y, answer64;
+    answer64 = M_REDUCE(x64*y64, mu64, prime64);
+    if (answer64 >= prime64) {
+      answer64 -= prime64;
+    }
+    return (int)answer64;
+}
+
 /** Compute x + ay mod p
  *
- * This is the scalar version of a row operation.  Supplying a value of 0
- * for the reduction constant mu signals that ordinary division should be
- * used to compute the standard representative of x + ay.  Otherwise,
- * Montgomery reduction is used to compute the Montgomery representative.
+ * This is the scalar version of a row operation.  Supplying a value of 0 for
+ * the reduction constant mu signals that ordinary division should be used to
+ * compute the standard representative of x + ay.  Otherwise, Montgomery
+ * reduction is used to compute the Montgomery representative.  The compact
+ * version assumes mu is non-zero and expects 64 bit values for p and mu.
  */
 
 static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
@@ -185,6 +197,20 @@ static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
   if (answer64 < 0) {
     answer64 += prime64;
   } else if (answer64 >= prime64) {
+    answer64 -= prime64;
+  }
+  return (int)answer64;
+}
+
+static inline int compact_x_plus_ay_mod(int64_t prime64, int x, int a, int y,
+					int64_t mu64) {
+  int64_t x64 = x, y64 = y, a64 = a, answer64;
+  answer64 = M_REDUCE(a64*y64, mu64, prime64);
+  if (answer64 >= prime64) {
+    answer64 -= prime64;
+  }
+  answer64 += x64;
+  if (answer64 >= prime64) {
     answer64 -= prime64;
   }
   return (int)answer64;
@@ -246,6 +272,7 @@ void Poly_free(Polynomial_t* P) {
 
 static inline bool Poly_decompress(Polynomial_t* P, int prime, int mu) {
   int i, value;
+  int64_t prime64 = prime, mu64 = mu;
   if (P->num_terms > 0) {
     P->terms = (Term_t*)malloc(P->num_terms*sizeof(Term_t));
     if (P->terms == NULL){
@@ -254,7 +281,7 @@ static inline bool Poly_decompress(Polynomial_t* P, int prime, int mu) {
   }
   for (i = 0; i < P->num_terms; i++) {
     P->terms[i] = P->table[P->coefficients[i].column_index];
-    value = multiply_mod(prime, P->coefficients[i].value, 1, mu);
+    value = compact_multiply_mod(prime64, P->coefficients[i].value, 1, mu64);
     P->coefficients[i].column_index = INDEX_UNSET;
     P->coefficients[i].value = value;
   }
@@ -425,9 +452,9 @@ static inline bool Poly_p_plus_aq_normal(Polynomial_t* P, int a, Polynomial_t* Q
 
 static inline bool Poly_p_plus_aq_compact(Polynomial_t* P, int a, Polynomial_t* Q,
                                   Polynomial_t* answer, int prime, int rank, int mu) {
-  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
+  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, new_value;
   coeff_t p_coeff, q_coeff;
-  int new_value;
+  int64_t prime64 = prime, mu64 = mu;
   if (! Poly_alloc(answer, size, rank)) {
     return false;
   }
@@ -440,12 +467,12 @@ static inline bool Poly_p_plus_aq_compact(Polynomial_t* P, int a, Polynomial_t* 
       answer->coefficients[N++] = p_coeff;
       p_coeff = P->coefficients[++p];
     } else if (cmp < 0) { /* deg P < deg Q */
-      new_value = multiply_mod(prime, a, q_coeff.value, mu);
+      new_value = compact_multiply_mod(prime64, a, q_coeff.value, mu64);
       answer->coefficients[N].column_index = q_coeff.column_index;
       answer->coefficients[N++].value = new_value;
       q_coeff = Q->coefficients[++q];
     } else { /* deg P == deg Q */
-      new_value = x_plus_ay_mod(prime, p_coeff.value, a, q_coeff.value, mu);
+      new_value = compact_x_plus_ay_mod(prime64, p_coeff.value, a, q_coeff.value, mu64);
       if (new_value != 0) {
 	answer->coefficients[N].column_index = p_coeff.column_index;
 	answer->coefficients[N++].value = new_value;
@@ -457,7 +484,7 @@ static inline bool Poly_p_plus_aq_compact(Polynomial_t* P, int a, Polynomial_t* 
   /* At most one of these two loops will be non-trivial. */
   for (; q < Q->num_terms; q++, N++) {
     q_coeff = Q->coefficients[q];
-    new_value = multiply_mod(prime, a, q_coeff.value, mu);
+    new_value = compact_multiply_mod(prime64, a, q_coeff.value, mu64);
     answer->coefficients[N].column_index = q_coeff.column_index;
     answer->coefficients[N].value = new_value;
   }
