@@ -711,9 +711,11 @@ cdef class F4State(object):
     cdef public P
     cdef public selected
     cdef public S
+    cdef public Fplus
 
     def __init__(self, G, P, selected):
         self.G, self.P, self.selected, self.S = list(G), set(P), set(selected), []
+        self.Fplus = []
 
 cdef class Ideal(object):
     cdef public generators
@@ -845,6 +847,8 @@ cdef class Ideal(object):
                 self.history.append(F4State(G, P, selected))
             L = ([p.left_prod() for p in selected], [p.right_prod() for p in selected])
             new_generators = self.reduce(L, G)
+            if self.verbosity > 1:
+                self.history[-1].Fplus = new_generators
             P = P - selected
             for h in new_generators:
                 G, P = self.update(G, P, h)
@@ -948,19 +952,25 @@ cdef class Ideal(object):
         cdef list S
         cdef tuple tails
         cdef Polynomial reducer, f1, f2
-        cdef Term_t* g_head
+        cdef Term_t* g_head, h_head
         cdef int rank = self.ring.rank
         cdef int G_size = len(G)
         cdef int i, errors
         S = []
         errors = 0
-        for p1, p2 in zip(*L):
-             t1, f1 = self.simplify(p1[0], p1[1])
-             t2, f2 = self.simplify(p2[0], p2[1])
-             if not Poly_equals(&f1.c_poly, &f2.c_poly):
-                 S.extend((self.mult((t1, f1)), self.mult((t2, f2))))
+        for h_pair, g_pair in zip(*L):
+             t1, f1 = s1 = self.simplify(*h_pair)
+             t2, f2 = s2 = self.simplify(*g_pair)
+             # Workaround in case the two simplifications are equal.  This can only
+             # happen when HT(h) divides HT(g) (so update has removed g from G_old).
+             # In this case, t1 and t2 will both be trivial and f1 and f2 will both
+             # equal g, which is different from h.  The workaround is just to not
+             # simplify the h pair.
+             if (t1.total_degree == t2.total_degree == 0 and
+                 Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
+                 S.extend((self.mult(h_pair), self.mult(s2)))
              else:
-                 S.extend((self.mult(p1), self.mult((t2, f2))))
+                 S.extend((self.mult(s1), self.mult(s2)))
         tails = self.tails(S)
         for t in tails:
             for g in G:
@@ -1070,7 +1080,7 @@ cdef class Ideal(object):
 
         Second, he says: ":math:`u\star f` is in :math:`F_j`" when he means
         ":math:`HT(u\star f)` is in :math:`HT(F_j)`".
- 
+
         The first typo is fixed in his 2013 slide presentation.  While the
         second typo is not fixed in the slides, his example shows that he is
         only looking at head terms (i.e. top reducibility).  As he explains in
