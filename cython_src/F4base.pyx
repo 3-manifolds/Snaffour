@@ -864,6 +864,7 @@ cdef class Ideal(object):
             if self.verbosity > 1:
                 self.history[-1].Fplus = new_generators
             P = P - selected
+            # Changing the order of the generators can be disastrous.
             for h in new_generators:
                 G, P = self.update(G, P, h)
         self._groebner_basis = G
@@ -944,7 +945,7 @@ cdef class Ideal(object):
         that select one pair.
 
         We mention that Faugère's paper omits the proof of correctness of the F4
-        algorithm.  Instead it (mis)states a Theorem from the book by T. Becker
+        algorithm.  Instead it states Theorem 5.64 from the book by T. Becker
         and V. Weispfenning along with Theorem 2.4, and says that these two results
         could be used in a proof of correctness, without actually giving the proof.
 
