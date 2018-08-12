@@ -952,7 +952,7 @@ cdef class Ideal(object):
         cdef list S
         cdef tuple tails
         cdef Polynomial reducer, f1, f2
-        cdef Term_t* g_head, h_head
+        cdef Term_t* g_head
         cdef int rank = self.ring.rank
         cdef int G_size = len(G)
         cdef int i, errors
