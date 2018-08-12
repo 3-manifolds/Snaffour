@@ -648,6 +648,8 @@ cdef class PolyMatrix(object):
     to access this data.  It does not hold references to the input polynomials.
     """
     cdef public PolyRing ring
+    cdef public int num_rows0
+    cdef public int num_nonzero0
     cdef public int num_rows
     cdef public int num_columns
     cdef public float elapsed
@@ -673,10 +675,13 @@ cdef class PolyMatrix(object):
         answer = <Polynomial_t *>malloc(N*sizeof(Polynomial_t))
         assert isinstance(poly_list[0], Polynomial)
         self.ring = poly_list[0].ring
+        self.num_rows0 = len(poly_list)
+        self.num_nonzero0 = 0
         for n, p in enumerate(poly_list):
             assert isinstance(p, Polynomial)
             assert p.ring is self.ring
             polys[n] = &p.c_poly
+            self.num_nonzero0 += p.c_poly.num_terms
         start = time.time()
         if not Poly_echelon(polys, answer, N, &self.num_columns,
                             self.ring.characteristic, self.ring.rank):
@@ -702,6 +707,15 @@ cdef class PolyMatrix(object):
     @property
     def size(self):
         return (self.num_rows, self.num_columns)
+
+    @property
+    def initial_density(self):
+        return float(self.num_nonzero0)/(self.num_rows0*self.num_columns)
+
+    @property
+    def final_density(self):
+        nonzero = sum(len(p) for p in self.rows)
+        return float(nonzero)/(self.num_rows*self.num_columns)
 
 cdef class F4State(object):
     """
@@ -885,7 +899,7 @@ cdef class Ideal(object):
         F_ech = PolyMatrix(F)
         rows = F_ech.rows
         if self.verbosity > 0:
-            print('matrix size = %s; time = %.3fs'%(F_ech.size, F_ech.elapsed))
+            print('size = %s; time = %.3fs;'%(F_ech.size, F_ech.elapsed))
         self.echelons.append(F_ech)
         heads = {f.head_term for f in F}
         return [f for f in rows if f.head_term not in heads]
@@ -969,8 +983,11 @@ cdef class Ideal(object):
              if (t1.total_degree == t2.total_degree == 0 and
                  Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
                  S.extend((self.mult(h_pair), self.mult(s2)))
+                 errors += 1
              else:
                  S.extend((self.mult(s1), self.mult(s2)))
+        if self.verbosity > 0:
+            print('%d trivial simplified s-polys;'%errors, end=' ')
         tails = self.tails(S)
         for t in tails:
             for g in G:
@@ -1182,7 +1199,7 @@ cdef class Ideal(object):
             d += 1
             selected |= {p for p in pairs if p.lcm.total_degree == d}
         if self.verbosity > 0:
-            print('Selected %3.d pairs of degree %d.'%(len(selected), d), end=' ')
+            print('Degree %d; %d new pairs;'%(d, len(selected)), end=' ')
         return selected
 
     def terms(self, list polys):
