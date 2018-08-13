@@ -1137,6 +1137,7 @@ cdef class Ideal(object):
         cdef Term_t **c_heads
         cdef int i
         cdef int rank = self.ring.rank
+        cdef int q_degree = q_head.total_degree
         result = (t, q) # The default result, if there is nothing better.
         if t.total_degree == 0:
             for F_ech in echelons:
@@ -1168,6 +1169,10 @@ cdef class Ideal(object):
                         else:
                             # Recursively search for a simpler pair.
                             return self.simplify(t_over_u, f)
+                    # Since we sort the echelon forms, we can bail as soon as we hit
+                    # a head term < q_head.
+                    if Term_total_degree(c_heads[i], rank) < q_degree:
+                        break
         return result
 
     def id_select(self, pairs):
