@@ -380,8 +380,8 @@ cdef class Monomial(object):
 
 cdef class Polynomial(object):
     """
-    A polynomial over a PolyRing.  The underlying C strucure of a Polynomial is
-    an array of terms, maintained sorted by decreasing degree, and a seperate
+    A polynomial over a PolyRing.  The underlying C structure of a Polynomial is
+    an array of terms, maintained sorted by decreasing degree, and a separate
     array of coefficients.  (They are kept separate for alignment reasons.)
 
     Instantiate a polynomial with a mapping from degrees to coefficients or with
@@ -644,7 +644,7 @@ cdef class Pair:
 cdef class PolyMatrix(object):
     """
     A PolyMatrix is initialized with a list of polynomials.  During initialization
-    it computes and store the reduced echelon form in a way that will make it fast
+    it computes and stores the reduced echelon form in a way that will make it fast
     to access this data.  It does not hold references to the input polynomials.
     """
     cdef public PolyRing ring
@@ -859,12 +859,11 @@ cdef class Ideal(object):
             selected = self.select(P)
             if self.verbosity > 1:
                 self.history.append(F4State(G, P, selected))
+            P = P - selected
             L = ([p.left_prod() for p in selected], [p.right_prod() for p in selected])
             new_generators = self.reduce(L, G)
-            if self.verbosity > 1:
-                self.history[-1].Fplus = new_generators
-            P = P - selected
-            # Changing the order of the generators can be disastrous.
+            # The new generators are sorted by descending head terms.
+            # Changing the order can be disastrous!
             for h in new_generators:
                 G, P = self.update(G, P, h)
         self._groebner_basis = G
@@ -905,7 +904,10 @@ cdef class Ideal(object):
         # provided a 60% speedup.
         self.echelons.insert(0, F_ech)
         heads = {f.head_term for f in F}
-        return [f for f in rows if f.head_term not in heads]
+        Fplus = [f for f in rows if f.head_term not in heads]
+        if self.verbosity > 1:
+            self.history[-1].Fplus = Fplus
+        return Fplus
 
     def preprocess(self, L, list G):
         """
@@ -990,7 +992,7 @@ cdef class Ideal(object):
              else:
                  S.extend((self.mult(s1), self.mult(s2)))
         if self.verbosity > 0:
-            print('%d trivial simplified s-polys;'%errors, end=' ')
+            print('%d trivial s-polys;'%errors, end=' ')
         tails = self.tails(S)
         for t in tails:
             for g in G:
