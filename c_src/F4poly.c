@@ -1023,10 +1023,10 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       continue;
     }
     if (!Poly_decompress(row_i, prime, mu)) {
-      for (j = 0; j < i; j++) {
-	Poly_free(row_i);
-	goto oom;
+      for (j = 0; j <= i; j++) {
+	Poly_free(answer + j);
       }
+      goto oom;
     }
   }
   free(term_table);

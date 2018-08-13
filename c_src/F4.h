@@ -179,6 +179,7 @@ void Poly_sort(Polynomial_t* P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size, int rank);
 
 /* Use Python's memory allocation */
+#include "Python.h"
 #include "pymem.h"
 
 #define malloc PyMem_Malloc
