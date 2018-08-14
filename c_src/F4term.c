@@ -89,14 +89,12 @@ bool Term_divides(Term_t *t, Term_t *s) {
   return true;
 }
 
-Term16_t zero16 = (Term16_t){0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-
 /* Divide t by s, if possible, and report success. */
 bool Term_divide(Term_t *t, Term_t *s, Term_t *answer) {
   Term16_t failure;
   for (int i = 0; i < 2; i++) {
     answer->degree[i] = t->degree[i] - s->degree[i];
-    failure = (answer->degree[i] < zero16);
+    failure = (answer->degree[i] < 0);
     int64_t *L = (int64_t *) &failure;
     if ( L[0] != 0 || L[1] != 0) {
       return false;
