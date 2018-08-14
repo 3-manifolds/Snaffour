@@ -952,7 +952,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   Term_t* term_table = NULL;
   Polynomial_t *row_i, *row_j;
   Polynomial_t buffer = zero, tmp;
-  int head;
+  int head, last_pivot = -1;
   /* Compute constants needed for the Montgomery representation. */
   /* First, mu, the negative inverse of p mod R.
    * This seems to work, even though M_RADIX is negative as a signed int.
@@ -985,17 +985,35 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     Poly_make_monic(P[i], prime, rank, mu, R_cubed);
   }
   /*
-   * The best pivoting strategy I have found is to sort by increasing head term
-   * once, at the beginning.  Doing subsequent sorts seems to cost more than it
-   * saves.
+   * This implementation depends upon sorting the rows by increasing head term.
    */
   qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads);
   for (i = 0; i < num_rows; i++) {
     row_i = answer + i;
     if (row_i->num_terms == 0) continue;
     head = row_i->coefficients->column_index;
-    for (j = 0; j < num_rows; j++) {
-      if (i == j) continue;
+    /* Clear above.  Since head terms are non-decreasing, we can skip this step
+     * the first time that a new head term is seen because we know that the
+     * column is already clear above.
+     */
+    if (head <= last_pivot) {
+      for (j = 0; j < i; j++) {
+        row_j = answer + j;
+        if (row_j->num_terms == 0) continue;
+        if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
+          if (! row_op(row_i, row_j, &buffer, coeff, prime, rank, mu, R_cubed, R_mod_p)) {
+            return false;
+          }
+          tmp = answer[j];
+          answer[j] = buffer;
+          buffer = tmp;
+        }
+      }
+    } else {
+      last_pivot = head;
+    }
+    /* Clear below. */
+    for (j = i + 1; j < num_rows; j++) {
       row_j = answer + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
