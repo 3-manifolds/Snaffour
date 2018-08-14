@@ -178,6 +178,40 @@ bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int
 void Poly_sort(Polynomial_t* P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size, int rank);
 
+/**
+ * When computing echelon forms over Fp, we use the Montgomery representation
+ * of a conjugacy class mod p.  Given a class X, its Montgomery representative
+ * M(X) is an element of [0, p) such that M(X) is congruent to RX mod p, where
+ * the Montgomery radix R will always be 2^31 for us.
+ */
+
+#define M_RADIX (1 << 31)
+#define M_RADIX64 ((int64_t)(1) << 31)
+
+/* Reducing mod R is equivalent to anding with this constant. */
+
+#define MOD_R 0x7fffffff
+
+/**
+ * The distributive law implies M(X) + M(Y) = M(X+Y).  However, M(X)*M(Y) is
+ * not congruent to M(X*Y) mod p.  In fact M(X)*M(Y) = R*M(X*Y) mod p.  So
+ * computing the Montgomery representative of a product requires being able to
+ * divide by R mod p.  The point of choosing R to be a power of 2 is that this
+ * can be done without using hardware division.
+ *
+ * Given X in [0, p^2) the following macro computes an element of [0, 2p)
+ * representing X/R in Fp. It requires a precomputed constant mu in [0, p)
+ * such that mu represents -1/R in Fp.  (Hardware division can by used to
+ * compute mu, since it is only done once per echelon form.)  The macro uses 2
+ * multiplies, 2 AND operations 1 addition and a shift.  At most one extra
+ * subtraction is needed to compute the standard representative of X/R in Fp.
+ *
+ * NOTE: the arguments for the macro must be 64 bits wide to avoid overflow!!!
+ *
+ */
+
+#define M_REDUCE(X, mu, p) ((X + (((X & MOD_R)*mu) & MOD_R)*p) >> 31)
+
 /* Use Python's memory allocation */
 #include "Python.h"
 #include "pymem.h"
