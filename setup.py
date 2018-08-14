@@ -17,7 +17,7 @@ extra_compile_args=['-msse2', '-O3', '-funroll-loops']
 
 F4base = Extension(
     name = 'snaffour.F4base',
-    sources = ['cython_src/F4base.c', 'c_src/F4term.c', 'c_src/F4poly.c'],
+    sources = ['cython_src/F4base.c', 'c_src/term.c', 'c_src/polynomial.c'],
     include_dirs = ['cython_src', 'c_src'], 
     extra_compile_args = extra_compile_args,
     extra_link_args = extra_link_args

@@ -22,7 +22,7 @@
  *   Author homepage: http://www.unhyperbolic.org/
  */
 
-#include "F4.h"
+#include "snaffour.h"
 
 void Term_print(Term_t *t, int rank) {
   char *c = (char *)&t->degree;

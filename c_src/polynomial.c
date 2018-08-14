@@ -22,7 +22,7 @@
  *   Author homepage: http://www.unhyperbolic.org/
  */
 
-#include "F4.h"
+#include "snaffour.h"
 #include <assert.h>
 
 /** Struct to hold the result of an extended gcd computation.

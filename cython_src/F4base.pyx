@@ -32,7 +32,7 @@ from libc.stdint cimport int64_t
 from cpython.mem cimport PyMem_Malloc as malloc, PyMem_Realloc as realloc, PyMem_Free as free
 import time, re
 
-cdef extern from "F4.h":
+cdef extern from "snaffour.h":
     ctypedef int bool
     cdef struct Term_s:
         pass
