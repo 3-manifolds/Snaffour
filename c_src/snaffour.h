@@ -184,8 +184,7 @@ typedef struct Row_s {
   int num_terms;          /* How many terms in this Polynomial. */
   int max_size;           /* How many terms and coefficients the allocated memory will hold. */
   coeff_t* coefficients;
-  Term_t* terms;
-  Term_t* table;
+  Term_t* term_table;
 } Row_t;
 
 /**

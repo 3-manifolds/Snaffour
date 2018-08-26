@@ -40,18 +40,12 @@ Polynomial_t zero_poly = {.num_terms = 0,
 
 Row_t zero_row = {.num_terms = 0,
                   .max_size = 0,
-                  .terms = NULL,
                   .coefficients = NULL,
-                  .table = NULL};
+                  .term_table = NULL};
 
 static bool Row_alloc(Row_t* P, int size) {
   int old_size = P->max_size;
   if (size > old_size) {
-    if (P->table == NULL) {
-      if (NULL == (P->terms = realloc(P->terms, sizeof(Term_t)*size))) {
-	goto oom;
-      }
-    }
     if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size))) {
       goto oom;
     }
@@ -61,17 +55,14 @@ static bool Row_alloc(Row_t* P, int size) {
   return true;
 
  oom:
-  free(P->table);
-  free(P->terms);
+  free(P->term_table);
   free(P->coefficients);
   return false;
 }
 
 static void Row_free(Row_t* P) {
-  free(P->terms);
   free(P->coefficients);
   P->num_terms = 0;
-  P->terms = NULL;
   P->coefficients = NULL;
 }
 
@@ -126,7 +117,7 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
                                  Term_t* table, char* pivot_info, int num_pivots,
                                  int prime, int mu, int R_squared) {
   int i, value;
-  dest->table = table;
+  dest->term_table = table;
   /* First make sure there is enough room in the destination. */
   if (!Row_alloc(dest, src->num_terms)) {
     return false;
@@ -157,7 +148,7 @@ static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, int prim
    * representation to the standard representation.
    */
   for (i = 0; i < Q->num_terms; i++) {
-    Q->terms[i] = P->table[P->coefficients[i].column_index];
+    Q->terms[i] = P->term_table[P->coefficients[i].column_index];
     value = compact_multiply_mod(prime64, P->coefficients[i].value, 1, mu64);
     Q->coefficients[i].column_index = INDEX_UNSET;
     Q->coefficients[i].value = value;
@@ -174,7 +165,7 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
   if (! Row_alloc(answer, size)) {
     return false;
   }
-  answer->table = P->table;
+  answer->term_table = P->term_table;
   p_coeff = P->coefficients[0];
   q_coeff = Q->coefficients[0];
   while (p < P->num_terms && q < Q->num_terms) {
@@ -478,7 +469,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
                   int* num_columns, int prime, int rank) {
   int i, j, coeff, mu, R_squared, R_cubed, R_mod_p;
   int64_t prime64 = prime, radix64 = M_RADIX64, R_squared64, R_cubed64;
-  Term_t* term_table = NULL;
+  Term_t* table = NULL;
   Row_t *row_i, *row_j, *matrix = NULL;
   Row_t buffer = zero_row, tmp;
   int head, last_pivot = -1;
@@ -506,12 +497,12 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Row_t)))) {
     goto oom;;
   }
-  if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &term_table, 
+  if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &table, 
                         matrix, rank, prime, mu, R_squared)) {
     goto oom;
   }
   /* Allocate one extra row to use as a buffer. */
-  buffer.table = term_table;
+  buffer.term_table = table;
   if (!Row_alloc(&buffer, *num_columns)) {
     goto oom;
   }
@@ -583,12 +574,12 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     }
   }
   free(matrix);
-  free(term_table);
+  free(table);
   return true;
 
  oom:
   Row_free(&buffer);
   free(matrix);
-  free(term_table);
+  free(table);
   return false;
 }
