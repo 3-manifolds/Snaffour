@@ -178,6 +178,18 @@ bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int
 void Poly_sort(Polynomial_t* P, int num_polys, bool increasing);
 bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size, int rank);
 
+/** Rows in a Polynomial Matrix
+ */
+
+typedef struct Row_s {
+  int num_terms;          /* How many terms in this Polynomial. */
+  int max_size;           /* How many terms and coefficients the allocated memory will hold. */
+  int rank;               /* The number of variables in the parent polynomial ring. */
+  coeff_t* coefficients;
+  Term_t* terms;
+  Term_t* table;
+} Row_t;
+
 /**
  * When computing echelon forms over Fp, we use the Montgomery representation
  * of a conjugacy class mod p.  Given a class X, its Montgomery representative
