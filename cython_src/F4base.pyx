@@ -63,7 +63,6 @@ cdef extern from "snaffour.h":
         int rank
         coeff_t* coefficients
         Term_t* terms
-        Term_t* table
     ctypedef Polynomial_s Polynomial_t
 
     cdef bool Poly_alloc(Polynomial_t* P, int size, int rank)
@@ -431,7 +430,6 @@ cdef class Polynomial(object):
         self.c_poly.max_size = 0
         self.c_poly.coefficients = NULL
         self.c_poly.terms = NULL
-        self.c_poly.table = NULL
 
     def __dealloc__(self):
         Poly_free(&self.c_poly)

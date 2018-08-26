@@ -181,10 +181,8 @@ static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
 bool Poly_alloc(Polynomial_t* P, int size, int rank) {
   int old_size = P->max_size;
   if (size > old_size) {
-    if (P->table == NULL) {
-      if (NULL == (P->terms = realloc(P->terms, sizeof(Term_t)*size))) {
-	goto oom;
-      }
+    if (NULL == (P->terms = realloc(P->terms, sizeof(Term_t)*size))) {
+      goto oom;
     }
     if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size))) {
       goto oom;
@@ -196,7 +194,6 @@ bool Poly_alloc(Polynomial_t* P, int size, int rank) {
   return true;
 
  oom:
-  free(P->table);
   free(P->terms);
   free(P->coefficients);
   return false;
@@ -226,10 +223,8 @@ void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
   int i;
   /* First make sure there is enough room in the destination. */
   Poly_alloc(dest, src->num_terms, src->rank);
-  if (src->table == NULL) {
-    for (i=0; i < src->num_terms; i++) {
-      dest->terms[i] = src->terms[i];
-    }
+  for (i=0; i < src->num_terms; i++) {
+    dest->terms[i] = src->terms[i];
   }
   for (i=0; i < src->num_terms; i++) {
     dest->coefficients[i] = src->coefficients[i];
@@ -247,11 +242,7 @@ void Poly_print(Polynomial_t* P, int rank) {
   } else {
     for (i=0; i<P->num_terms; i++) {
       printf("%d*", P->coefficients[i].value);
-      if (P->table != NULL) {
-	Term_print(P->table + P->coefficients[i].column_index, rank);
-      } else {
-	Term_print(&P->terms[i], rank);
-      }
+      Term_print(&P->terms[i], rank);
       printf("\n");
     }
   }
@@ -409,21 +400,12 @@ bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
   if (P->num_terms != Q->num_terms) {
     return false;
   }
-  if (P->table != NULL) {
-    for (int N = 0; N < P->num_terms; N++) {
-      if (P->coefficients[N].column_index != Q->coefficients[N].column_index ||
-	  P->coefficients[N].value != Q->coefficients[N].value) {
-	return false;
-      }
+  for (int N = 0; N < P->num_terms; N++) {
+    if (! Term_equals(P->terms + N, Q->terms + N)) {
+      return false;
     }
-  } else {
-    for (int N = 0; N < P->num_terms; N++) {
-      if (! Term_equals(P->terms + N, Q->terms + N)) {
-	return false;
-      }
-      if (P->coefficients[N].value != Q->coefficients[N].value) {
-	return false;
-      }
+    if (P->coefficients[N].value != Q->coefficients[N].value) {
+      return false;
     }
   }
   return true;
@@ -438,7 +420,7 @@ static inline bool find_index(Polynomial_t* P, Term_t* t, int t_td, int rank,
 		      int bottom, int top, int* index) {
   int middle;
   int td;
-  Term_t *terms = P->table == NULL ? P->terms : P->table;
+  Term_t *terms = P->terms;
   if (top - bottom == 1) {
     if (Term_equals(t, terms + bottom)) {
 	*index = bottom;

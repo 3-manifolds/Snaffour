@@ -36,8 +36,7 @@
 Polynomial_t zero_poly = {.num_terms = 0,
                           .max_size = 0,
                           .terms = NULL,
-                          .coefficients = NULL,
-                          .table = NULL};
+                          .coefficients = NULL};
 
 Row_t zero_row = {.num_terms = 0,
                   .max_size = 0,
@@ -507,7 +506,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   assert(0 <= R_cubed && R_cubed < prime);
   assert((R_cubed - M_RADIX * M_RADIX * M_RADIX) % prime == 0);
   /* Create the matrix. */
-  if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Polynomial_t)))) {
+  if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Row_t)))) {
     goto oom;;
   }
   if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &term_table, 
@@ -520,7 +519,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     goto oom;
   }
   /* This implementation requires sorting the rows by increasing head term.*/
-  qsort(matrix, num_rows, sizeof(Polynomial_t), compare_heads);
+  qsort(matrix, num_rows, sizeof(Row_t), compare_heads);
   
   for (i = 0; i < num_rows; i++) {
     row_i = matrix + i;

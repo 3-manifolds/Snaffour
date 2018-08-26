@@ -157,7 +157,6 @@ typedef struct Polynomial_s {
   int rank;               /* The number of variables in the parent polynomial ring. */
   coeff_t* coefficients;
   Term_t* terms;
-  Term_t* table;
 } Polynomial_t;
 
 bool Poly_alloc(Polynomial_t *P, int size, int rank);
