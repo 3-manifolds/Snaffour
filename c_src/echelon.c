@@ -95,11 +95,11 @@ static inline int compact_x_plus_ay_mod(int64_t prime64, int x, int a, int y,
  * The coefficients of P are modified in place.
  */
 
-static void Row_make_monic(Row_t *P, int prime, int mu, int R_cubed) {
-  int N = 0, a_inverse = inverse_mod(prime, P->coefficients[0].value);
-  int64_t prime64 = prime, mu64 = mu;
+static void Row_make_monic(Row_t *P, MConstants_t C) {
+  int N = 0, a_inverse = inverse_mod(C.prime, P->coefficients[0].value);
+  int64_t prime64 = C.prime, mu64 = C.mu;
   /* Compute the Montgomery representation of the inverse. */
-  a_inverse = compact_multiply_mod(prime64, a_inverse, R_cubed, mu64);
+  a_inverse = compact_multiply_mod(prime64, a_inverse, C.R_cubed, mu64);
   for (N=0; N < P->num_terms; N++) {
     P->coefficients[N].value = compact_multiply_mod(
                prime64, a_inverse, P->coefficients[N].value, mu64);
@@ -115,7 +115,7 @@ static void Row_make_monic(Row_t *P, int prime, int mu, int R_cubed) {
  */
 static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
                                  Term_t* table, char* pivot_info, int num_pivots,
-                                 int prime, int mu, int R_squared) {
+                                 MConstants_t C) {
   int i, value;
   dest->term_table = table;
   /* First make sure there is enough room in the destination. */
@@ -124,7 +124,7 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
   }
   for (i=0; i < src->num_terms; i++) {
     value = src->coefficients[i].value;
-    value = compact_multiply_mod(prime, value, R_squared, mu);
+    value = compact_multiply_mod(C.prime, value, C.R_squared, C.mu);
     dest->coefficients[i].column_index = src->coefficients[i].column_index;
     dest->coefficients[i].value = value;
   }
@@ -136,9 +136,9 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
  * Allocates a new Polynomial of normal flavor and frees the old one.
  */
 
-static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, int prime, int mu) {
+static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, MConstants_t C) {
   int i, value;
-  int64_t prime64 = prime, mu64 = mu;
+  int64_t prime64 = C.prime, mu64 = C.mu;
   *Q = zero_poly;
   if (!Poly_alloc(Q, P->num_terms, rank)) {
     return false;
@@ -213,15 +213,14 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
  */
 
 static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer,
-                          int g_coeff, int num_pivots, int prime,
-                          int mu, int R_cubed, int R_mod_p) {
+                          int g_coeff, int num_pivots, MConstants_t C) {
   /* Invert a mod p using the xgcd.*/
-  int a_inverse = inverse_mod(prime, f->coefficients[0].value);
+  int a_inverse = inverse_mod(C.prime, f->coefficients[0].value);
   /* Multiply by R^3 to get the Montgomery inverse */
-  a_inverse = compact_multiply_mod(prime, a_inverse, R_cubed, mu);
+  a_inverse = compact_multiply_mod(C.prime, a_inverse, C.R_cubed, C.mu);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X)u. */
-  int factor = prime - compact_multiply_mod(prime, a_inverse, g_coeff, mu);
-  if (! Poly_p_plus_aq_compact(g, factor, f, answer, prime, mu)) {
+  int factor = C.prime - compact_multiply_mod(C.prime, a_inverse, g_coeff, C.mu);
+  if (! Poly_p_plus_aq_compact(g, factor, f, answer, C.prime, C.mu)) {
     return false;
   }
   return true;
@@ -343,7 +342,7 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays,
 static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
                              int* num_pivots,
                              Term_t** term_table, Row_t* matrix,
-			     int rank, int prime, int mu, int R_squared) {
+			     int rank, MConstants_t C) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
@@ -412,8 +411,7 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
   /**/
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero_row;
-    if (!Poly_compress(P[i], matrix + i, table, pivot_info, *num_pivots,
-                       prime, mu, R_squared)) {
+    if (!Poly_compress(P[i], matrix + i, table, pivot_info, *num_pivots, C)) {
       for (j = 0; j < i; j++) {
         Row_free(matrix + i);
       }
@@ -456,6 +454,23 @@ static inline bool coeff_in_column(Row_t* P, int column, int bottom,
   }
 }
 
+static inline MConstants_t montgomery_init(int prime) {
+  int64_t prime64 = prime, radix64 = M_RADIX64;
+  int64_t R_squared64 = (radix64 * radix64) % prime64;
+  MConstants_t C;
+  C.prime = prime;
+  /* mu = -1/p mod R */
+  C.mu = inverse_mod(M_RADIX, (int)(radix64 - prime64));
+  /* R mod p, i.e. M(1) (used to check if a row is monic). */
+  C.R_mod_p = (int)(radix64 % prime64);
+  /* R^2 mod p (used to compute Montgomery representatives). */
+  C.R_squared = (int)R_squared64;
+  /* R^3 mod p (used to compute Montgomery inverses). */
+  int64_t R_cubed64 = (R_squared64 * radix64) % prime64;
+  C.R_cubed = (int)R_cubed64;
+  return C;
+}
+
 /** Echelon Form
  *
  * Input an array P of Polynomial pointers, and an array answer of unitialized
@@ -467,48 +482,32 @@ static inline bool coeff_in_column(Row_t* P, int column, int bottom,
 
 bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
                   int* num_columns, int prime, int rank) {
-  int i, j, coeff, mu, R_squared, R_cubed, R_mod_p;
-  int64_t prime64 = prime, radix64 = M_RADIX64, R_squared64, R_cubed64;
+  int i, j, coeff;
   Term_t* table = NULL;
   Row_t *row_i, *row_j, *matrix = NULL;
   Row_t buffer = zero_row, tmp;
-  int head, last_pivot = -1;
-  int num_pivots;
-  /* Compute constants needed for the Montgomery representation. */
-  /* First, mu, the negative inverse of p mod R.
-   * This seems to work, even though M_RADIX is negative as a signed int.
-   */
-  mu = inverse_mod(M_RADIX, (int)(radix64 - prime64));
-  assert(0 <= mu && mu & ~MOD_R == 0); 
-  assert((1 + ((int64_t)mu * radix64) % radix64) == 0);
-  /* R mod p, i.e. M(1) (used to check if a row is monic). */
-  R_mod_p = (int)(radix64 % prime64);
-  /* R^2 mod p (used to compute Montgomery representatives). */
-  R_squared64 = (radix64 * radix64) % prime64;
-  R_squared = (int)R_squared64;
-  assert(0 <= R_squared && R_squared < prime);
-  assert((R_squared - M_RADIX * M_RADIX) % prime == 0);
-  /* R^3 mod p (used to compute Montgomery inverses). */
-  R_cubed64 = (R_squared64 * radix64) % prime64;
-  R_cubed = (int)R_cubed64;
-  assert(0 <= R_cubed && R_cubed < prime);
-  assert((R_cubed - M_RADIX * M_RADIX * M_RADIX) % prime == 0);
+  int head, num_pivots, last_pivot = -1;
+  MConstants_t constants = montgomery_init(prime);
+  
   /* Create the matrix. */
   if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Row_t)))) {
     goto oom;;
   }
   if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &table, 
-                        matrix, rank, prime, mu, R_squared)) {
+                        matrix, rank, constants)) {
     goto oom;
   }
+  
   /* Allocate one extra row to use as a buffer. */
   buffer.term_table = table;
   if (!Row_alloc(&buffer, *num_columns)) {
     goto oom;
   }
+  
   /* This implementation requires sorting the rows by increasing head term.*/
   qsort(matrix, num_rows, sizeof(Row_t), compare_heads);
-  
+
+  /* Reduce the matrix to echelon form. */
   for (i = 0; i < num_rows; i++) {
     row_i = matrix + i;
     if (row_i->num_terms == 0) continue;
@@ -522,8 +521,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
         row_j = matrix + j;
         if (row_j->num_terms == 0) continue;
         if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-          if (! row_op(row_i, row_j, &buffer, coeff, num_pivots,
-                       prime, mu, R_cubed, R_mod_p)) {
+          if (! row_op(row_i, row_j, &buffer, coeff, num_pivots, constants)) {
             return false;
           }
           tmp = matrix[j];
@@ -539,8 +537,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       row_j = matrix + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, row_j, &buffer, coeff, num_pivots,
-                     prime, mu, R_cubed, R_mod_p)) {
+        if (! row_op(row_i, row_j, &buffer, coeff, num_pivots, constants)) {
           return false;
         }
         tmp = matrix[j];
@@ -550,10 +547,12 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     }
   }
   Row_free(&buffer);
+  
   /*
    * While we are here in C land, let's sort the result by decreasing head term.
    */
   qsort(matrix, num_rows, sizeof(Row_t), compare_heads_dec);
+
   /*
    * Free unneeded memory and convert the row polynomials to monic polynomials
    * of standard flavor.
@@ -565,8 +564,8 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       Row_free(row_i);
       continue;
     }
-    Row_make_monic(row_i, prime, mu, R_cubed);
-    if (!Poly_decompress(row_i, answer + i, rank, prime, mu)) {
+    Row_make_monic(row_i, constants);
+    if (!Poly_decompress(row_i, answer + i, rank, constants)) {
       for (j = 0; j <= i; j++) {
 	Row_free(matrix + j);
       }
