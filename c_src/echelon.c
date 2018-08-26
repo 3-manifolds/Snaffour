@@ -44,7 +44,7 @@ Row_t zero_row = {.num_terms = 0,
                   .coefficients = NULL,
                   .table = NULL};
 
-static bool Row_alloc(Row_t* P, int size, int rank) {
+static bool Row_alloc(Row_t* P, int size) {
   int old_size = P->max_size;
   if (size > old_size) {
     if (P->table == NULL) {
@@ -58,7 +58,6 @@ static bool Row_alloc(Row_t* P, int size, int rank) {
     P->max_size = size;
   }
   P->num_terms = 0;
-  P->rank = rank;
   return true;
 
  oom:
@@ -72,7 +71,6 @@ static void Row_free(Row_t* P) {
   free(P->terms);
   free(P->coefficients);
   P->num_terms = 0;
-  P->rank = 0;
   P->terms = NULL;
   P->coefficients = NULL;
 }
@@ -130,7 +128,7 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
   int i, value;
   dest->table = table;
   /* First make sure there is enough room in the destination. */
-  if (!Row_alloc(dest, src->num_terms, src->rank)) {
+  if (!Row_alloc(dest, src->num_terms)) {
     return false;
   }
   for (i=0; i < src->num_terms; i++) {
@@ -147,11 +145,11 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
  * Allocates a new Polynomial of normal flavor and frees the old one.
  */
 
-static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int prime, int mu) {
+static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, int prime, int mu) {
   int i, value;
   int64_t prime64 = prime, mu64 = mu;
   *Q = zero_poly;
-  if (!Poly_alloc(Q, P->num_terms, P->rank)) {
+  if (!Poly_alloc(Q, P->num_terms, rank)) {
     return false;
   }
   Q->num_terms = P->num_terms;
@@ -169,11 +167,11 @@ static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int prime, int mu)
 }
 
 static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
-                                  Row_t* answer, int prime, int rank, int mu) {
+                                  Row_t* answer, int prime, int mu) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, new_value;
   coeff_t p_coeff, q_coeff;
   int64_t prime64 = prime, mu64 = mu;
-  if (! Row_alloc(answer, size, rank)) {
+  if (! Row_alloc(answer, size)) {
     return false;
   }
   answer->table = P->table;
@@ -210,7 +208,6 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
     answer->coefficients[N] = P->coefficients[p];
   }
   answer->num_terms = N;
-  answer->rank = rank;
   return true;
 }
 
@@ -225,7 +222,7 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
  */
 
 static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer,
-                          int g_coeff, int num_pivots, int prime, int rank,
+                          int g_coeff, int num_pivots, int prime,
                           int mu, int R_cubed, int R_mod_p) {
   /* Invert a mod p using the xgcd.*/
   int a_inverse = inverse_mod(prime, f->coefficients[0].value);
@@ -233,7 +230,7 @@ static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer,
   a_inverse = compact_multiply_mod(prime, a_inverse, R_cubed, mu);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X)u. */
   int factor = prime - compact_multiply_mod(prime, a_inverse, g_coeff, mu);
-  if (! Poly_p_plus_aq_compact(g, factor, f, answer, prime, rank, mu)) {
+  if (! Poly_p_plus_aq_compact(g, factor, f, answer, prime, mu)) {
     return false;
   }
   return true;
@@ -355,7 +352,7 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays,
 static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
                              int* num_pivots,
                              Term_t** term_table, Row_t* matrix,
-			     int prime, int rank, int mu, int R_squared) {
+			     int rank, int prime, int mu, int R_squared) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
@@ -510,12 +507,12 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     goto oom;;
   }
   if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &term_table, 
-                        matrix, prime, rank, mu, R_squared)) {
+                        matrix, rank, prime, mu, R_squared)) {
     goto oom;
   }
   /* Allocate one extra row to use as a buffer. */
   buffer.table = term_table;
-  if (!Row_alloc(&buffer, *num_columns, rank)) {
+  if (!Row_alloc(&buffer, *num_columns)) {
     goto oom;
   }
   /* This implementation requires sorting the rows by increasing head term.*/
@@ -535,7 +532,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
         if (row_j->num_terms == 0) continue;
         if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
           if (! row_op(row_i, row_j, &buffer, coeff, num_pivots,
-                       prime, rank, mu, R_cubed, R_mod_p)) {
+                       prime, mu, R_cubed, R_mod_p)) {
             return false;
           }
           tmp = matrix[j];
@@ -552,7 +549,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
         if (! row_op(row_i, row_j, &buffer, coeff, num_pivots,
-                     prime, rank, mu, R_cubed, R_mod_p)) {
+                     prime, mu, R_cubed, R_mod_p)) {
           return false;
         }
         tmp = matrix[j];
@@ -578,7 +575,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       continue;
     }
     Row_make_monic(row_i, prime, mu, R_cubed);
-    if (!Poly_decompress(row_i, answer + i, prime, mu)) {
+    if (!Poly_decompress(row_i, answer + i, rank, prime, mu)) {
       for (j = 0; j <= i; j++) {
 	Row_free(matrix + j);
       }

@@ -183,7 +183,6 @@ bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_siz
 typedef struct Row_s {
   int num_terms;          /* How many terms in this Polynomial. */
   int max_size;           /* How many terms and coefficients the allocated memory will hold. */
-  int rank;               /* The number of variables in the parent polynomial ring. */
   coeff_t* coefficients;
   Term_t* terms;
   Term_t* table;
