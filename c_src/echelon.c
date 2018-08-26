@@ -33,10 +33,11 @@
 /** A global zero polynomial.
  */
 
-Polynomial_t zero = {.num_terms = 0,
-		     .max_size = 0,
-		     .terms = NULL,
-		     .coefficients = NULL};
+Polynomial_t zero_poly = {.num_terms = 0,
+                          .max_size = 0,
+                          .terms = NULL,
+                          .coefficients = NULL,
+                          .table = NULL};
 
 static inline int compact_multiply_mod(int64_t prime64, int x, int y,
 				       int64_t mu64) {
@@ -88,25 +89,28 @@ static inline bool Poly_compress(Polynomial_t* src, Polynomial_t* dest,
   return true;
 }
 
-/** Decompress a compact Polynomial, converting it to normal flavor.
+/** Decompress a compact Polynomial
+ * Allocates a new Polynomial of normal flavor and frees the old one.
  */
 
-static inline bool Poly_decompress(Polynomial_t* P, int prime, int mu) {
+static inline bool Poly_decompress(Polynomial_t* P, Polynomial_t* Q, int prime, int mu) {
   int i, value;
   int64_t prime64 = prime, mu64 = mu;
-  if (P->num_terms > 0) {
-    P->terms = (Term_t*)malloc(P->num_terms*sizeof(Term_t));
-    if (P->terms == NULL){
-      return false;
-    }
+  *Q = zero_poly;
+  if (!Poly_alloc(Q, P->num_terms, P->rank)) {
+    return false;
   }
-  for (i = 0; i < P->num_terms; i++) {
-    P->terms[i] = P->table[P->coefficients[i].column_index];
+  Q->num_terms = P->num_terms;
+  /* Copy the terms and convert the coefficients from the Montgomery
+   * representation to the standard representation.
+   */
+  for (i = 0; i < Q->num_terms; i++) {
+    Q->terms[i] = P->table[P->coefficients[i].column_index];
     value = compact_multiply_mod(prime64, P->coefficients[i].value, 1, mu64);
-    P->coefficients[i].column_index = INDEX_UNSET;
-    P->coefficients[i].value = value;
+    Q->coefficients[i].column_index = INDEX_UNSET;
+    Q->coefficients[i].value = value;
   }
-  P->table = NULL;
+  Poly_free(P);
   return true;
 }
 
@@ -365,7 +369,7 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
   /* printf(" (%d pivots %dx%d)\n", *num_pivots, num_rows, *num_columns); */
   /**/
   for (i = 0; i < num_rows; i++) {
-    matrix[i] = zero;
+    matrix[i] = zero_poly;
     if (!Poly_compress(P[i], matrix + i, table, pivot_info, *num_pivots,
                        prime, mu, R_squared)) {
       for (j = 0; j < i; j++) {
@@ -424,8 +428,8 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   int i, j, coeff, mu, R_squared, R_cubed, R_mod_p;
   int64_t prime64 = prime, radix64 = M_RADIX64, R_squared64, R_cubed64;
   Term_t* term_table = NULL;
-  Polynomial_t *row_i, *row_j;
-  Polynomial_t buffer = zero, tmp;
+  Polynomial_t *row_i, *row_j, *matrix = NULL;
+  Polynomial_t buffer = zero_poly, tmp;
   int head, last_pivot = -1;
   int num_pivots;
   /* Compute constants needed for the Montgomery representation. */
@@ -448,8 +452,11 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   assert(0 <= R_cubed && R_cubed < prime);
   assert((R_cubed - M_RADIX * M_RADIX * M_RADIX) % prime == 0);
   /* Create the matrix. */
+  if (NULL == (matrix = (Polynomial_t*)malloc(num_rows*sizeof(Polynomial_t)))) {
+    goto oom;;
+  }
   if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &term_table, 
-                        answer, prime, rank, mu, R_squared)) {
+                        matrix, prime, rank, mu, R_squared)) {
     goto oom;
   }
   /* Allocate one extra row to use as a buffer. */
@@ -458,10 +465,10 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     goto oom;
   }
   /* This implementation requires sorting the rows by increasing head term.*/
-  qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads);
+  qsort(matrix, num_rows, sizeof(Polynomial_t), compare_heads);
   
   for (i = 0; i < num_rows; i++) {
-    row_i = answer + i;
+    row_i = matrix + i;
     if (row_i->num_terms == 0) continue;
     head = row_i->coefficients->column_index;
     /* Clear above.  Since head terms are non-decreasing, we can skip this step
@@ -470,15 +477,15 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
      */
     if (head <= last_pivot) {
       for (j = 0; j < i; j++) {
-        row_j = answer + j;
+        row_j = matrix + j;
         if (row_j->num_terms == 0) continue;
         if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
           if (! row_op(row_i, row_j, &buffer, coeff, num_pivots,
                        prime, rank, mu, R_cubed, R_mod_p)) {
             return false;
           }
-          tmp = answer[j];
-          answer[j] = buffer;
+          tmp = matrix[j];
+          matrix[j] = buffer;
           buffer = tmp;
         }
       }
@@ -487,15 +494,15 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     }
     /* Clear below. */
     for (j = i + 1; j < num_rows; j++) {
-      row_j = answer + j;
+      row_j = matrix + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
         if (! row_op(row_i, row_j, &buffer, coeff, num_pivots,
                      prime, rank, mu, R_cubed, R_mod_p)) {
           return false;
         }
-        tmp = answer[j];
-        answer[j] = buffer;
+        tmp = matrix[j];
+        matrix[j] = buffer;
         buffer = tmp;
       }
     }
@@ -504,30 +511,33 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   /*
    * While we are here in C land, let's sort the result by decreasing head term.
    */
-  qsort(answer, num_rows, sizeof(Polynomial_t), compare_heads_dec);
+  qsort(matrix, num_rows, sizeof(Polynomial_t), compare_heads_dec);
   /*
    * Free unneeded memory and convert the row polynomials to monic polynomials
    * of standard flavor.
    */
   for (i = 0; i < num_rows; i++) {
-    row_i = answer + i;
+    row_i = matrix + i;
     if (row_i->num_terms == 0) {
+      answer[i] = zero_poly;
       Poly_free(row_i);
       continue;
     }
     Poly_make_monic(row_i, prime, rank, mu, R_cubed);
-    if (!Poly_decompress(row_i, prime, mu)) {
+    if (!Poly_decompress(row_i, answer + i, prime, mu)) {
       for (j = 0; j <= i; j++) {
-	Poly_free(answer + j);
+	Poly_free(matrix + j);
       }
       goto oom;
     }
   }
+  free(matrix);
   free(term_table);
   return true;
 
  oom:
   Poly_free(&buffer);
+  free(matrix);
   free(term_table);
   return false;
 }
