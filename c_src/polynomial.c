@@ -106,26 +106,15 @@ int inverse_mod(int p, int x) {
  * multiplying by 1 converts back.
  */
 
-static inline int multiply_mod(int prime, int x, int y, int mu) {
-  int64_t prime64 = (int64_t)prime, x64 = (int64_t)x, y64 = (int64_t)y, mu64, answer64;
-  if (mu != 0) {
-    mu64 = mu;
-    answer64 = M_REDUCE(x64*y64, mu64, prime64);
-    /* Note: My tests indicate that this "if" is faster than:
-     * answer64 -= (~((answer64 - prime64) >> 63)) & prime64;
-     */
-    if (answer64 >= prime64) {
-      answer64 -= prime64;
-    }
-  } else { /* Not using a Montgomery representation. */
-    if (x == 1) {
-      return (int)y64;
-    } else if (x64 == prime64 - 1) {
-      return (int)(prime64 - y64);
-    }
-    answer64 = x64*y64;
-    answer64 = answer64 % prime64;
+static inline int multiply_mod(int prime, int x, int y) {
+  int64_t prime64 = (int64_t)prime, x64 = (int64_t)x, y64 = (int64_t)y, answer64;
+  if (x == 1) {
+    return (int)y64;
+  } else if (x64 == prime64 - 1) {
+    return (int)(prime64 - y64);
   }
+  answer64 = x64*y64;
+  answer64 = answer64 % prime64;
   return (int)answer64;
 }
 
@@ -311,7 +300,7 @@ static inline bool Poly_p_plus_aq_normal(Polynomial_t* P, int a, Polynomial_t* Q
       p_coeff = P->coefficients[++p];
     } else if (cmp < 0) { /* deg P < deg Q */
       answer->terms[N] = Q->terms[q];
-      new_value = multiply_mod(prime, a, q_coeff.value, mu);
+      new_value = multiply_mod(prime, a, q_coeff.value);
       answer->coefficients[N].column_index = q_coeff.column_index;
       answer->coefficients[N++].value = new_value;
       q_coeff = Q->coefficients[++q];
@@ -330,7 +319,7 @@ static inline bool Poly_p_plus_aq_normal(Polynomial_t* P, int a, Polynomial_t* Q
   for (; q < Q->num_terms; q++, N++) {
     answer->terms[N] = Q->terms[q];
     q_coeff = Q->coefficients[q];
-    new_value = multiply_mod(prime, a, q_coeff.value, mu);
+    new_value = multiply_mod(prime, a, q_coeff.value);
     answer->coefficients[N].column_index = q_coeff.column_index;
     answer->coefficients[N].value = new_value;
   }
@@ -493,7 +482,7 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
   for (N=0; N < P->num_terms; N++) {
     answer->terms[N] = P->terms[N];
     p_coeff = P->coefficients[N];
-    p_coeff.value = multiply_mod(prime, a, p_coeff.value, 0);
+    p_coeff.value = multiply_mod(prime, a, p_coeff.value);
     answer->coefficients[N] = p_coeff;
   }
   answer->num_terms = N;
@@ -506,15 +495,11 @@ bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int
  * The coefficients of P are modified in place.
  */
 
-void Poly_make_monic(Polynomial_t *P, int prime, int rank, int mu, int R_cubed) {
+void Poly_make_monic(Polynomial_t *P, int prime, int rank) {
   int N = 0, a_inverse = inverse_mod(prime, P->coefficients[0].value);
-  if (mu != 0) {
-    /* Use the Montgomery inverse. */
-    a_inverse = multiply_mod(prime, a_inverse, R_cubed, mu);
-  }
   for (N=0; N < P->num_terms; N++) {
     P->coefficients[N].value = multiply_mod(prime, a_inverse,
-                                            P->coefficients[N].value, mu);
+                                            P->coefficients[N].value);
   }
 }
 
