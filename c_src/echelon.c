@@ -443,6 +443,8 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
       goto oom;
     }
   }
+  /* This implementation requires sorting the rows by increasing head term.*/
+  qsort(matrix, num_rows, sizeof(Row_t), compare_heads);
   return true;
 
  oom:
@@ -502,15 +504,9 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     goto oom;
   }
   
-  /* Allocate one extra row to use as a buffer. */
+  /* Initialize the buffer row. */
   buffer.term_table = table;
-  if (!Row_alloc(&buffer, *num_columns)) {
-    goto oom;
-  }
   
-  /* This implementation requires sorting the rows by increasing head term.*/
-  qsort(matrix, num_rows, sizeof(Row_t), compare_heads);
-
   /* Reduce the matrix to echelon form. */
   for (i = 0; i < num_rows; i++) {
     row_i = matrix + i;
