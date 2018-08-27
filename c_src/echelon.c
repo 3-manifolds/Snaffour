@@ -24,8 +24,7 @@
 
 /** Echelon forms
  * 
- * This file contains functions used by the echelon form computation, and functions
- * specific to Polynomials of compact flavor.
+ * This file contains functions used by the echelon form computation.
  */
 
 #include "snaffour.h"
@@ -66,9 +65,17 @@ static void Row_free(Row_t* P) {
   P->coefficients = NULL;
 }
 
-static inline int compact_multiply_mod(int64_t prime64, int x, int y,
-				       int64_t mu64) {
-  int64_t x64 = (int64_t)x, y64 = (int64_t)y, answer64;
+/** Arithmetic with Montgomery representations.
+ *
+ * Convention: for low-level arithmetic operations we pass the
+ * required auxiliary constants as 32 bit int values, rather
+ * than passing the entire MConstants struct.  The intent is
+ * to make life easier for the optimizer when inlining these
+ * operations, although it is unclear whether it does that.
+ */
+
+static inline int montgomery_multiply(int x, int y, int prime, int mu) {
+  int64_t x64 = x, y64 = y, prime64 = prime, mu64 = mu, answer64;
   answer64 = M_REDUCE(x64*y64, mu64, prime64);
   if (answer64 >= prime64) {
     answer64 -= prime64;
@@ -76,9 +83,19 @@ static inline int compact_multiply_mod(int64_t prime64, int x, int y,
   return (int)answer64;
 }
 
-static inline int compact_x_plus_ay_mod(int64_t prime64, int x, int a, int y,
-					int64_t mu64) {
-  int64_t x64 = x, y64 = y, a64 = a, answer64;
+static inline int montgomery_inverse(int x, int prime, int mu, int R_cubed) {
+  int x_inverse = inverse_mod(prime, x);
+  int64_t R_cubed64 = R_cubed, prime64 = prime, mu64 = mu, answer64;
+  int64_t x_inverse64 = montgomery_multiply(x_inverse, R_cubed, prime, mu);
+  answer64 = M_REDUCE(x_inverse64*R_cubed64, mu64, prime64);
+  if (answer64 >= prime64) {
+    answer64 -= prime64;
+  }
+  return (int)answer64;
+}
+
+static inline int montgomery_x_plus_ay(int x, int a, int y, int prime, int mu) {
+  int64_t x64 = x, y64 = y, a64 = a, prime64 = prime, mu64 = mu, answer64;
   answer64 = M_REDUCE(a64*y64, mu64, prime64);
   if (answer64 >= prime64) {
     answer64 -= prime64;
@@ -96,22 +113,19 @@ static inline int compact_x_plus_ay_mod(int64_t prime64, int x, int a, int y,
  */
 
 static void Row_make_monic(Row_t *P, MConstants_t C) {
-  int N = 0, a_inverse = inverse_mod(C.prime, P->coefficients[0].value);
-  int64_t prime64 = C.prime, mu64 = C.mu;
-  /* Compute the Montgomery representation of the inverse. */
-  a_inverse = compact_multiply_mod(prime64, a_inverse, C.R_cubed, mu64);
+  int N = 0, a = P->coefficients->value;
+  int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
   for (N=0; N < P->num_terms; N++) {
-    P->coefficients[N].value = compact_multiply_mod(
-               prime64, a_inverse, P->coefficients[N].value, mu64);
+    P->coefficients[N].value = montgomery_multiply(
+      a_inverse, P->coefficients[N].value, C.prime, C.mu);
   }
 }
 
-/** Compress a Polynomial which is in transitional state.
+/** Convert a Polynomial which is in transitional state to a Row.
  *
- * This assumes that the source is almost a Polynomial of normal flavor, but
- * its column indexes have been set to indexes into a table containing all of
- * its terms.  The destination should have been initialized to zero, and will
- * be changed into a Polynomial of compact flavor.
+ * This assumes that the source's column indexes have been set to indexes into a
+ * table containing all of its terms.  The destination should have been
+ * initialized to zero.
  */
 static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
                                  Term_t* table, char* pivot_info, int num_pivots,
@@ -124,7 +138,7 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
   }
   for (i=0; i < src->num_terms; i++) {
     value = src->coefficients[i].value;
-    value = compact_multiply_mod(C.prime, value, C.R_squared, C.mu);
+    value = montgomery_multiply(value, C.R_squared, C.prime, C.mu);
     dest->coefficients[i].column_index = src->coefficients[i].column_index;
     dest->coefficients[i].value = value;
   }
@@ -132,13 +146,13 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
   return true;
 }
 
-/** Decompress a compact Polynomial
- * Allocates a new Polynomial of normal flavor and frees the old one.
+/** Convert a Row into a Polynomial
+ *
+ * Allocates a new Polynomial and frees the Row.
  */
 
 static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, MConstants_t C) {
   int i, value;
-  int64_t prime64 = C.prime, mu64 = C.mu;
   *Q = zero_poly;
   if (!Poly_alloc(Q, P->num_terms, rank)) {
     return false;
@@ -149,7 +163,7 @@ static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, MConstan
    */
   for (i = 0; i < Q->num_terms; i++) {
     Q->terms[i] = P->term_table[P->coefficients[i].column_index];
-    value = compact_multiply_mod(prime64, P->coefficients[i].value, 1, mu64);
+    value = montgomery_multiply(P->coefficients[i].value, 1, C.prime, C.mu);
     Q->coefficients[i].column_index = INDEX_UNSET;
     Q->coefficients[i].value = value;
   }
@@ -157,11 +171,10 @@ static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, MConstan
   return true;
 }
 
-static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
-                                  Row_t* answer, int prime, int mu) {
+static inline bool Row_p_plus_aq(Row_t* P, int a, Row_t* Q, Row_t* answer,
+                                 MConstants_t C) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, new_value;
   coeff_t p_coeff, q_coeff;
-  int64_t prime64 = prime, mu64 = mu;
   if (! Row_alloc(answer, size)) {
     return false;
   }
@@ -174,12 +187,13 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
       answer->coefficients[N++] = p_coeff;
       p_coeff = P->coefficients[++p];
     } else if (cmp < 0) { /* deg P < deg Q */
-      new_value = compact_multiply_mod(prime64, a, q_coeff.value, mu64);
+      new_value = montgomery_multiply(a, q_coeff.value, C.prime, C.mu);
       answer->coefficients[N].column_index = q_coeff.column_index;
       answer->coefficients[N++].value = new_value;
       q_coeff = Q->coefficients[++q];
     } else { /* deg P == deg Q */
-      new_value = compact_x_plus_ay_mod(prime64, p_coeff.value, a, q_coeff.value, mu64);
+      new_value = montgomery_x_plus_ay(p_coeff.value, a, q_coeff.value,
+                                       C.prime, C.mu);
       if (new_value != 0) {
 	answer->coefficients[N].column_index = p_coeff.column_index;
 	answer->coefficients[N++].value = new_value;
@@ -191,7 +205,7 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
   /* At most one of these two loops will be non-trivial. */
   for (; q < Q->num_terms; q++, N++) {
     q_coeff = Q->coefficients[q];
-    new_value = compact_multiply_mod(prime64, a, q_coeff.value, mu64);
+    new_value = montgomery_multiply(a, q_coeff.value, C.prime, C.mu);
     answer->coefficients[N].column_index = q_coeff.column_index;
     answer->coefficients[N].value = new_value;
   }
@@ -214,19 +228,17 @@ static inline bool Poly_p_plus_aq_compact(Row_t* P, int a, Row_t* Q,
 
 static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer,
                           int g_coeff, int num_pivots, MConstants_t C) {
-  /* Invert a mod p using the xgcd.*/
-  int a_inverse = inverse_mod(C.prime, f->coefficients[0].value);
-  /* Multiply by R^3 to get the Montgomery inverse */
-  a_inverse = compact_multiply_mod(C.prime, a_inverse, C.R_cubed, C.mu);
+  int a = f->coefficients->value;
+  int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X)u. */
-  int factor = C.prime - compact_multiply_mod(C.prime, a_inverse, g_coeff, C.mu);
-  if (! Poly_p_plus_aq_compact(g, factor, f, answer, C.prime, C.mu)) {
+  int factor = C.prime - montgomery_multiply(a_inverse, g_coeff, C.prime, C.mu);
+  if (! Row_p_plus_aq(g, factor, f, answer, C)) {
     return false;
   }
   return true;
 }
 
-/** Static function to compare two Terms in two Polynomials of compact flavor.
+/** Static function to compare two Terms in two Rows.
  *
  * Compare the pth term of P to the qth term of Q and return an integer which is
  * < 0 if the first one is smaller, > 0 if the second one is smaller and 0 if
@@ -331,8 +343,8 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays,
  *
  * Inputs an array P of polynomial pointers.  Sorts all of the terms which
  * appear in any of the polynomials and uses their sort position to set the
- * column_index field of each coefficient.  This prepares the polynomials for
- * conversion to the compact flavor, which is then carried out.
+ * column_index field of each coefficient.  This prepares the Polynomials for
+ * conversion to Rows, which is then carried out.
  *
  * The number of columns in the matrix having the input polynomials as its rows
  * is stored in the int referenced by the num_columns input, and the table of

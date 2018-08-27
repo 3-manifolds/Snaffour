@@ -24,10 +24,9 @@
 
 /** Basic Polynomial operations
  * 
- * This file contains support for the Cython extension class Polynomial.
- * All functions in this file expect a Polynomial_t of standard flavor.
- * Functions to support the echelon form computation and the compact flavor
- * are in the file echelon.c.
+ * This file contains support for the Cython extension class Polynomial.  All
+ * functions in this file expect a Polynomial_t of standard flavor.  Functions
+ * to support the echelon form computation are in the file echelon.c.
  */
 
 #include "snaffour.h"
@@ -93,17 +92,6 @@ int inverse_mod(int p, int x) {
 /** Multiply two elements of Z/pZ.
  *
  * Arguments should be ints in the interval [0,p).
- *
- * Supplying a value of 0 for the reduction constant mu signals that hardware
- * division should be used to compute the standard representative of x + ay.
- * Otherwise, Montgomery reduction is used to compute the Montgomery
- * representative.  The compact version assumes mu is non-zero and expects
- * 64 bit values for p and mu.
- *
- * This function can also be used to convert between standard and Montgomery
- * representations.  Multiplying by the standard representative of R^2 mod P
- * converts a standard element to its Montgomery representation, and
- * multiplying by 1 converts back.
  */
 
 static inline int multiply_mod(int prime, int x, int y) {
@@ -120,33 +108,20 @@ static inline int multiply_mod(int prime, int x, int y) {
 
 /** Compute x + ay mod p
  *
- * This is the scalar version of a row operation.  Supplying a value of 0 for
- * the reduction constant mu signals that ordinary division should be used to
- * compute the standard representative of x + ay.  Otherwise, Montgomery
- * reduction is used to compute the Montgomery representative.  The compact
- * version assumes mu is non-zero and expects 64 bit values for p and mu.
+ * This is the scalar version of a row operation.
  */
 
-static inline int x_plus_ay_mod(int prime, int x, int a, int y, int mu) {
-  int64_t prime64 = prime, x64 = x, y64 = y, a64 = a, mu64, answer64;
-    if (mu != 0) {
-      mu64 = mu;
-      answer64 = M_REDUCE(a64*y64, mu64, prime64);
-      if (answer64 >= prime64) {
-      	answer64 -= prime64;
-      }
-      answer64 += x64;
-    } else {  /* Not using a Montgomery representation. */
-      if (a == 1) {
-	answer64 = x64 + y64;
-      } else if (a == prime - 1) {
-	answer64 = x64 - y64;
-      } else {
-	answer64 = a64*y64;
-	answer64 = answer64 % prime64;
-	answer64 += x64;
-      }
-    }
+static inline int x_plus_ay_mod(int prime, int x, int a, int y) {
+  int64_t prime64 = prime, x64 = x, y64 = y, a64 = a, answer64;
+  if (a == 1) {
+    answer64 = x64 + y64;
+  } else if (a == prime - 1) {
+    answer64 = x64 - y64;
+  } else {
+    answer64 = a64*y64;
+    answer64 = answer64 % prime64;
+    answer64 += x64;
+  }
   if (answer64 < 0) {
     answer64 += prime64;
   } else if (answer64 >= prime64) {
@@ -205,8 +180,6 @@ void Poly_free(Polynomial_t* P) {
 
 /** Copy a Polynomial's data into another Polynomial.
  *
- * The src and dest must have the same flavor and, if compact, must share the
- * same table.
  */
 void Poly_copy(Polynomial_t* src, Polynomial_t* dest) {
   int i;
@@ -282,8 +255,8 @@ static inline int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, in
  * NOTE: P and Q must point to different polynomials for this to work.
  */
 
-static inline bool Poly_p_plus_aq_normal(Polynomial_t* P, int a, Polynomial_t* Q,
-                                  Polynomial_t* answer, int prime, int rank, int mu) {
+static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
+                                  Polynomial_t* answer, int prime, int rank) {
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp;
   coeff_t p_coeff, q_coeff;
   int new_value;
@@ -305,7 +278,7 @@ static inline bool Poly_p_plus_aq_normal(Polynomial_t* P, int a, Polynomial_t* Q
       answer->coefficients[N++].value = new_value;
       q_coeff = Q->coefficients[++q];
     } else { /* deg P == deg Q */
-      new_value = x_plus_ay_mod(prime, p_coeff.value, a, q_coeff.value, mu);
+      new_value = x_plus_ay_mod(prime, p_coeff.value, a, q_coeff.value);
       if (new_value != 0) {
 	answer->terms[N] = P->terms[p];
 	answer->coefficients[N].column_index = p_coeff.column_index;
@@ -352,14 +325,14 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
     for (N=0; N < P->num_terms; N++) {
       answer->terms[N] = P->terms[N];
       p_coeff = P->coefficients[N];
-      p_coeff.value = x_plus_ay_mod(prime, p_coeff.value, 1, p_coeff.value, 0);
+      p_coeff.value = x_plus_ay_mod(prime, p_coeff.value, 1, p_coeff.value);
       answer->coefficients[N] = p_coeff;
     }
     answer->num_terms = N;
     answer->rank = rank;
     return true;
   }
-  return Poly_p_plus_aq_normal(P, 1, Q, answer, prime, rank, 0);
+  return Poly_p_plus_aq(P, 1, Q, answer, prime, rank);
 }
 
 /** Subtract Polynomials P and Q and store the result P - Q in answer.
@@ -376,13 +349,11 @@ bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
     answer->num_terms = 0;
     return true;
   }
-  return Poly_p_plus_aq_normal(P, prime - 1, Q, answer, prime, rank, 0);
+  return Poly_p_plus_aq(P, prime - 1, Q, answer, prime, rank);
 }
 
 /** Determine if two Polynomials are equal.
  *
- * The operands must have the same flavor and, if compact, must share
- * the same table.
  */
 
 bool Poly_equals(Polynomial_t* P, Polynomial_t *Q) {
