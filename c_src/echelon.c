@@ -149,8 +149,7 @@ static void Row_make_monic(Row_t *P, MConstants_t C) {
  * table containing all of its terms.  The destination should have been
  * initialized to zero.
  */
-static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
-                                 Term_t* table, char* pivot_info, int num_pivots,
+static inline bool Poly_compress(Polynomial_t* src, Row_t* dest, Term_t* table,
                                  MConstants_t C) {
   int i, value;
   dest->term_table = table;
@@ -253,8 +252,8 @@ static inline bool Row_p_plus_aq(Row_t* P, int a, Row_t* Q, Row_t* answer,
  *
  */
 
-static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer,
-                          int g_coeff, int num_pivots, MConstants_t C) {
+static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer, int g_coeff,
+                          MConstants_t C) {
   int a = f->coefficients->value;
   int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
@@ -383,14 +382,12 @@ static bool monomial_merge(monomial_array_t* M, int num_arrays,
  */
 
 static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
-                             int* num_pivots,
                              Term_t** term_table, Row_t* matrix,
 			     int rank, MConstants_t C) {
   int num_monomials = 0, i, j, index;
   monomial_t *pool;
   monomial_array_t monomial_arrays[num_rows], previous, merged;
   Term_t *table = NULL;
-  char *pivot_info = NULL;
 
   /* Construct the shared table of Terms. */
   for (i = 0; i < num_rows; i++) {
@@ -435,40 +432,23 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
   *term_table = table;
   free(merged.monomials);
   free(pool);
-  
-  /* Construct the pivot info table and count the number of a priori pivots. */
-  if (NULL == (pivot_info = (char*)calloc(*num_columns, sizeof(char)))) {
-    goto oom;
-  }
-  *num_pivots = 0;
-  for (i = 0; i < num_rows; i++) {
-    if (P[i]->num_terms > 0) {
-      int column_index = P[i]->coefficients->column_index;
-      if (pivot_info[column_index] == 0) {
-        pivot_info[column_index] = 1;
-        (*num_pivots)++;
-      }
-    }
-  }
 
   /* Construct the matrix. */
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero_row;
-    if (!Poly_compress(P[i], matrix + i, table, pivot_info, *num_pivots, C)) {
+    if (!Poly_compress(P[i], matrix + i, table, C)) {
       for (j = 0; j < i; j++) {
         Row_free(matrix + i);
       }
       goto oom;
     }
   }
-  free(pivot_info);
   return true;
 
  oom:
   free(merged.monomials);
   free(pool);
   free(table);
-  free(pivot_info);
   return false;
 }
 
@@ -511,15 +491,14 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   Term_t* table = NULL;
   Row_t *row_i, *row_j, *matrix = NULL;
   Row_t buffer = zero_row, tmp;
-  int head, num_pivots, last_pivot = -1;
-  MConstants_t constants = montgomery_init(prime);
+  int head, last_pivot = -1;
+  MConstants_t C = montgomery_init(prime);
   
   /* Create the matrix. */
   if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Row_t)))) {
     goto oom;;
   }
-  if (!Poly_matrix_init(P, num_rows, num_columns, &num_pivots, &table, 
-                        matrix, rank, constants)) {
+  if (!Poly_matrix_init(P, num_rows, num_columns, &table, matrix, rank, C)) {
     goto oom;
   }
   
@@ -546,7 +525,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
         row_j = matrix + j;
         if (row_j->num_terms == 0) continue;
         if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-          if (! row_op(row_i, row_j, &buffer, coeff, num_pivots, constants)) {
+          if (! row_op(row_i, row_j, &buffer, coeff, C)) {
             return false;
           }
           tmp = matrix[j];
@@ -563,7 +542,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       row_j = matrix + j;
       if (row_j->num_terms == 0) continue;
       if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, row_j, &buffer, coeff, num_pivots, constants)) {
+        if (! row_op(row_i, row_j, &buffer, coeff, C)) {
           return false;
         }
         tmp = matrix[j];
@@ -588,9 +567,9 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       answer[i] = zero_poly;
       Row_free(row_i);
     } else {
-      Row_make_monic(row_i, constants);
+      Row_make_monic(row_i, C);
       /* If decompression is successful, the row will be freed.*/
-      if (!Poly_decompress(row_i, answer + i, rank, constants)) {
+      if (!Poly_decompress(row_i, answer + i, rank, C)) {
         for (j = 0; j <= i; j++) {
           Row_free(matrix + j);
         }
