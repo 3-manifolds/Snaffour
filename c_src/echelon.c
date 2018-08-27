@@ -29,7 +29,7 @@
 
 #include "snaffour.h"
 
-/** Global zero values.
+/** Global zero values for initialization.
  */
 
 Polynomial_t zero_poly = {.num_terms = 0,
@@ -41,6 +41,10 @@ Row_t zero_row = {.num_terms = 0,
                   .max_size = 0,
                   .coefficients = NULL,
                   .term_table = NULL};
+
+/** Memory allocation.
+ *
+ */
 
 static bool Row_alloc(Row_t* P, int size) {
   int old_size = P->max_size;
@@ -73,6 +77,24 @@ static void Row_free(Row_t* P) {
  * to make life easier for the optimizer when inlining these
  * operations, although it is unclear whether it does that.
  */
+
+
+static inline MConstants_t montgomery_init(int prime) {
+  int64_t prime64 = prime, radix64 = M_RADIX64;
+  int64_t R_squared64 = (radix64 * radix64) % prime64;
+  MConstants_t C;
+  C.prime = prime;
+  /* mu = -1/p mod R */
+  C.mu = inverse_mod(M_RADIX, (int)(radix64 - prime64));
+  /* R mod p, i.e. M(1) (used to check if a row is monic). */
+  C.R_mod_p = (int)(radix64 % prime64);
+  /* R^2 mod p (used to compute Montgomery representatives). */
+  C.R_squared = (int)R_squared64;
+  /* R^3 mod p (used to compute Montgomery inverses). */
+  int64_t R_cubed64 = (R_squared64 * radix64) % prime64;
+  C.R_cubed = (int)R_cubed64;
+  return C;
+}
 
 static inline int montgomery_multiply(int x, int y, int prime, int mu) {
   int64_t x64 = x, y64 = y, prime64 = prime, mu64 = mu, answer64;
@@ -148,7 +170,7 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
 
 /** Convert a Row into a Polynomial
  *
- * Allocates a new Polynomial and frees the Row.
+ * The Polynomial is expanded if necessary and the Row is freed.
  */
 
 static inline bool Poly_decompress(Row_t* src, Polynomial_t* dest, int rank, MConstants_t C) {
@@ -170,6 +192,11 @@ static inline bool Poly_decompress(Row_t* src, Polynomial_t* dest, int rank, MCo
   Row_free(src);
   return true;
 }
+
+/** Compute P + aQ for rows P and Q and Montgomery representation a.
+ *
+ * The result is saved in the Row namend "answer".
+ */
 
 static inline bool Row_p_plus_aq(Row_t* P, int a, Row_t* Q, Row_t* answer,
                                  MConstants_t C) {
@@ -258,6 +285,8 @@ static inline int compare_heads_dec(const void* p1, const void* p2) {
 }
 
 /** Merge two arrays of monomials.
+ *
+ * Used in building the table of terms.
  */
 
 static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
@@ -305,6 +334,8 @@ static bool monomial_merge_two(monomial_array_t M0, monomial_array_t M1,
 }
 
 /** Merge many arrays of monomials by divide and conquer.
+ *
+ * Used in building the table of terms.
  */
 
 static bool monomial_merge(monomial_array_t* M, int num_arrays,
@@ -360,6 +391,8 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
   monomial_array_t monomial_arrays[num_rows], previous, merged;
   Term_t *table = NULL;
   char *pivot_info = NULL;
+
+  /* Construct the shared table of Terms. */
   for (i = 0; i < num_rows; i++) {
     num_monomials += P[i]->num_terms;
   }
@@ -402,6 +435,8 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
   *term_table = table;
   free(merged.monomials);
   free(pool);
+  
+  /* Construct the pivot info table and count the number of a priori pivots. */
   if (NULL == (pivot_info = (char*)calloc(*num_columns, sizeof(char)))) {
     goto oom;
   }
@@ -415,12 +450,8 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
       }
     }
   }
-  /* Temporary */
-  /* for (i = 0; i < *num_columns; i++) { */
-  /*   printf("%d", pivot_info[i]); */
-  /* } */
-  /* printf(" (%d pivots %dx%d)\n", *num_pivots, num_rows, *num_columns); */
-  /**/
+
+  /* Construct the matrix. */
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero_row;
     if (!Poly_compress(P[i], matrix + i, table, pivot_info, *num_pivots, C)) {
@@ -443,8 +474,7 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
 
 /** Use bisection to find the coefficient of P with a given column index.
  *
- * Return false if no non-zero coefficient of P has the column index.
- * When the column indexes are available this is quite a bit faster.
+ * Return false if P has a zero coefficient in the column.
  */
 
 static inline bool coeff_in_column(Row_t* P, int column, int bottom,
@@ -464,23 +494,6 @@ static inline bool coeff_in_column(Row_t* P, int column, int bottom,
   } else {
     return coeff_in_column(P, column, middle, top, coefficient);
   }
-}
-
-static inline MConstants_t montgomery_init(int prime) {
-  int64_t prime64 = prime, radix64 = M_RADIX64;
-  int64_t R_squared64 = (radix64 * radix64) % prime64;
-  MConstants_t C;
-  C.prime = prime;
-  /* mu = -1/p mod R */
-  C.mu = inverse_mod(M_RADIX, (int)(radix64 - prime64));
-  /* R mod p, i.e. M(1) (used to check if a row is monic). */
-  C.R_mod_p = (int)(radix64 % prime64);
-  /* R^2 mod p (used to compute Montgomery representatives). */
-  C.R_squared = (int)R_squared64;
-  /* R^3 mod p (used to compute Montgomery inverses). */
-  int64_t R_cubed64 = (R_squared64 * radix64) % prime64;
-  C.R_cubed = (int)R_cubed64;
-  return C;
 }
 
 /** Echelon Form
@@ -567,22 +580,22 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   qsort(matrix, num_rows, sizeof(Row_t), compare_heads_dec);
 
   /*
-   * Free unneeded memory and convert the row polynomials to monic polynomials
-   * of standard flavor.
+   * Convert the rows to monic polynomials and free the rows.
    */
   for (i = 0; i < num_rows; i++) {
     row_i = matrix + i;
     if (row_i->num_terms == 0) {
       answer[i] = zero_poly;
       Row_free(row_i);
-      continue;
-    }
-    Row_make_monic(row_i, constants);
-    if (!Poly_decompress(row_i, answer + i, rank, constants)) {
-      for (j = 0; j <= i; j++) {
-	Row_free(matrix + j);
+    } else {
+      Row_make_monic(row_i, constants);
+      /* If decompression is successful, the row will be freed.*/
+      if (!Poly_decompress(row_i, answer + i, rank, constants)) {
+        for (j = 0; j <= i; j++) {
+          Row_free(matrix + j);
+        }
+        goto oom;
       }
-      goto oom;
     }
   }
   free(matrix);

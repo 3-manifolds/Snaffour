@@ -24,9 +24,8 @@
 
 /** Basic Polynomial operations
  * 
- * This file contains support for the Cython extension class Polynomial.  All
- * functions in this file expect a Polynomial_t of standard flavor.  Functions
- * to support the echelon form computation are in the file echelon.c.
+ * This file contains support for the Cython extension class Polynomial.
+ * The echelon form computation is contained in the file echelon.c.
  */
 
 #include "snaffour.h"
@@ -170,7 +169,7 @@ bool Poly_alloc(Polynomial_t* P, int size, int rank) {
 /** Free the terms and coefficients of a Polynomial, if not NULL.
  *
  * The pointers are set to NULL after freeing the arrays and num_terms is
- * set to 0.  The flavor does not change!
+ * set to 0.
  */
 
 void Poly_free(Polynomial_t* P) {
@@ -223,23 +222,12 @@ void Poly_print(Polynomial_t* P, int rank) {
 
 static inline int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, int q) {
   if (P->num_terms > 0 && Q->num_terms > 0) {
-    int P_index = P->coefficients[p].column_index;
-    int Q_index = Q->coefficients[q].column_index;
-    if (P_index >= 0 && Q_index >= 0) {
-      /* If both column indexes are non-negative, use them for the comparison. */
-      return P_index - Q_index;
-    } else {
-      /*
-       * Otherwise do the comparison from scratch.  This only happens for the
-       * standard flavor
-       */
-      Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
-      int td1, td2, td_cmp;
-      td1 = Term_total_degree(P_term, P->rank);
-      td2 = Term_total_degree(Q_term, Q->rank);
-      td_cmp = td1 - td2;
-      return td_cmp == 0 ? Term_revlex_diff(Q_term, P_term, P->rank) : td_cmp;
-    }
+    Term_t *P_term = P->terms + p, *Q_term = Q->terms + q;
+    int td1, td2, td_cmp;
+    td1 = Term_total_degree(P_term, P->rank);
+    td2 = Term_total_degree(Q_term, Q->rank);
+    td_cmp = td1 - td2;
+    return td_cmp == 0 ? Term_revlex_diff(Q_term, P_term, P->rank) : td_cmp;
   } else if (P->num_terms == 0 && Q->num_terms == 0) {
     return 0;
   } else if (P->num_terms == 0) {
@@ -252,9 +240,8 @@ static inline int Poly_compare_terms(Polynomial_t *P, int p, Polynomial_t *Q, in
 /** Static function to compute P + a*Q for an element a of the coefficient field.
  *
  * This is the core of the row operation used to reduce a matrix to echelon form
- * and also handles addition and subtraction (by taking a=1 or a=-1).
- *
- * The operands must have the standard flavor.
+ * although we do not use Polynomials in the echelon form computation.  This
+ * function also handles addition and subtraction (by taking a=1 or a=-1).
  *
  * NOTE: P and Q must point to different polynomials for this to work.
  */
@@ -312,8 +299,6 @@ static inline bool Poly_p_plus_aq(Polynomial_t* P, int a, Polynomial_t* Q,
 
 /** Add Polynomials P and Q and store the result in answer.
  *
- * The operands must have normal flavor.
- *
  * The work is done by Poly_p_plus_aq, but we need to deal with the special case
  * where P and Q are the same Polynomial.
  */
@@ -340,8 +325,6 @@ bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
 }
 
 /** Subtract Polynomials P and Q and store the result P - Q in answer.
- *
- * The operands must have normal flavor.
  *
  * The work is done by Poly_p_plus_aq, but we need to deal with the special case
  * where P and Q are the same Polynomial (by returning a 0 Polynomial).
@@ -421,8 +404,6 @@ int Poly_coeff(Polynomial_t* P, Term_t* t, int rank) {
 
 /** Multiply a Polynomial by a Term.
  *
- * The Polynomial must have the standard flavor.
- *
  * Much of the F4 algorithm works with "unevaluated products" (t, f) but eventually
  * they need to be evaluated.  This function does the evaluation.
  */
@@ -445,7 +426,6 @@ bool Poly_times_term(Polynomial_t *P, Term_t *t, Polynomial_t *answer, int prime
 
 /** Multiply a Polynomial by an int.
  *
- *  The Polynomial must have the standard flavor.
  */
 
 bool Poly_times_int(Polynomial_t *P, int a, Polynomial_t *answer, int prime, int rank) {
