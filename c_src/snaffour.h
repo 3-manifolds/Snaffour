@@ -177,10 +177,14 @@ bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_siz
 typedef struct Row_s {
   int num_terms;          /* How many terms in this Polynomial. */
   int max_size;           /* How many terms and coefficients the allocated memory will hold. */
+  int flags;
   coeff_t* coefficients;
   Term_t* term_table;
 } Row_t;
 
+#define IS_PIVOT_FLAG 1
+#define IS_PIVOT_ROW(row) ((row)->flags & IS_PIVOT_FLAG)
+#define SET_IS_PIVOT_ROW(row) ((row)->flags |= IS_PIVOT_FLAG)
 /**
  * When computing echelon forms over Fp, we use the Montgomery representation
  * of a conjugacy class mod p.  Given a class X, its Montgomery representative

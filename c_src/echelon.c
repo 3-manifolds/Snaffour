@@ -512,9 +512,9 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     row_i = matrix + i;
     if (row_i->num_terms == 0) continue;
     head = row_i->coefficients->column_index;
-    /* Clear above.  Since head terms are non-decreasing, we can skip this step
-     * the first time that a new head term is seen because we know that the
-     * column is already clear above.
+    /* Clear above.  Since head terms are initially non-decreasing, we can skip
+     * this step the first time that a new head term is seen because we know
+     * that the column is already clear above.
      */
     if (head <= last_pivot) {
       for (j = 0; j < i; j++) {
@@ -530,6 +530,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
         }
       }
     } else {
+      SET_IS_PIVOT_ROW(row_i);
       last_pivot = head;
     }
     /* Clear below. */
