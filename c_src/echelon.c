@@ -192,37 +192,48 @@ static inline bool Poly_decompress(Row_t* src, Polynomial_t* dest, int rank, MCo
   return true;
 }
 
-/** Compute P + aQ for rows P and Q and Montgomery representation a.
+/** The basic row operation
  *
- * The result is saved in the Row namend "answer".
+ * Assume that Q is non-zero, and that the head term of Q has nonzero
+ * coefficient in P.  Kill that term of P by subtracting a scalar
+ * multiple of Q.  If the head coefficient of Q is a and the
+ * corresponding coefficient of P is b, then the computed answer is
+ * P - (b/a)*Q.
+ *
  */
 
-static inline bool Row_p_plus_aq(Row_t* P, int a, Row_t* Q, Row_t* answer,
-                                 MConstants_t C) {
+static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
+                          MConstants_t C) {
+  int a = Q->coefficients->value;
+  int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
+  /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
+  int factor = C.prime - montgomery_multiply(a_inverse, P_coeff, C.prime, C.mu);
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, new_value;
   coeff_t p_coeff, q_coeff;
   if (! Row_alloc(answer, size)) {
     return false;
   }
   answer->term_table = P->term_table;
-  p_coeff = P->coefficients[0];
-  q_coeff = Q->coefficients[0];
+  p_coeff = P->coefficients[p];
+  q_coeff = Q->coefficients[q];
   while (p < P->num_terms && q < Q->num_terms) {
     cmp = p_coeff.column_index - q_coeff.column_index;
-    if (cmp > 0) { /* deg P > deg Q */
+    if (cmp > 0) { /* deg P[p] > deg Q[q] */
       answer->coefficients[N++] = p_coeff;
       p_coeff = P->coefficients[++p];
-    } else if (cmp < 0) { /* deg P < deg Q */
-      new_value = montgomery_multiply(a, q_coeff.value, C.prime, C.mu);
+    } else if (cmp < 0) { /* deg P[p] < deg Q[q] */
       answer->coefficients[N].column_index = q_coeff.column_index;
+      new_value = montgomery_multiply(factor, q_coeff.value, C.prime, C.mu);
       answer->coefficients[N++].value = new_value;
       q_coeff = Q->coefficients[++q];
-    } else { /* deg P == deg Q */
-      new_value = montgomery_x_plus_ay(p_coeff.value, a, q_coeff.value,
-                                       C.prime, C.mu);
-      if (new_value != 0) {
-	answer->coefficients[N].column_index = p_coeff.column_index;
-	answer->coefficients[N++].value = new_value;
+    } else { /* deg P[p] == deg Q[q] */
+      if (q > 0) {/* We know that the head term of Q will cancel. */
+        new_value = montgomery_x_plus_ay(p_coeff.value, factor, q_coeff.value,
+                                         C.prime, C.mu);
+        if (new_value != 0) {
+          answer->coefficients[N].column_index = p_coeff.column_index;
+          answer->coefficients[N++].value = new_value;
+        }
       }
       p_coeff = P->coefficients[++p];
       q_coeff = Q->coefficients[++q];
@@ -231,7 +242,7 @@ static inline bool Row_p_plus_aq(Row_t* P, int a, Row_t* Q, Row_t* answer,
   /* At most one of these two loops will be non-trivial. */
   for (; q < Q->num_terms; q++, N++) {
     q_coeff = Q->coefficients[q];
-    new_value = montgomery_multiply(a, q_coeff.value, C.prime, C.mu);
+    new_value = montgomery_multiply(factor, q_coeff.value, C.prime, C.mu);
     answer->coefficients[N].column_index = q_coeff.column_index;
     answer->coefficients[N].value = new_value;
   }
@@ -239,28 +250,6 @@ static inline bool Row_p_plus_aq(Row_t* P, int a, Row_t* Q, Row_t* answer,
     answer->coefficients[N] = P->coefficients[p];
   }
   answer->num_terms = N;
-  return true;
-}
-
-/** The basic row operation
- *
- * Assume that f is non-zero, and that the head term of f has nonzero
- * coefficient in g.  Kill that term of g by subtracting a scalar
- * multiple of f.  If the head coefficient of f is a and the
- * corresponding coefficient of g is b, then the computed answer is
- * g - (b/a)*f.
- *
- */
-
-static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer, int g_coeff,
-                          MConstants_t C) {
-  int a = f->coefficients->value;
-  int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
-  /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
-  int factor = C.prime - montgomery_multiply(a_inverse, g_coeff, C.prime, C.mu);
-  if (! Row_p_plus_aq(g, factor, f, answer, C)) {
-    return false;
-  }
   return true;
 }
 
@@ -530,7 +519,6 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
         }
       }
     } else {
-      SET_IS_PIVOT_ROW(row_i);
       last_pivot = head;
     }
     /* Clear below. */
