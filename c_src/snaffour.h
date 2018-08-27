@@ -72,11 +72,11 @@ bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
  * Coefficients are used in both Polynomials and Rows.
  * The coefficient stores a column index, which is used in the echelon
  * reduction to speed up comparisons of Terms.  The index should be set to
- * INDEX_UNSET if the coefficient appears in a Polynomial.
+ * NO_INDEX if the coefficient appears in a Polynomial.
  */
 
 /* Negative values of the column index are used as flags.*/
-#define INDEX_UNSET  -1
+#define NO_INDEX  -1
 #define DUPLICATE  -2
 
 typedef struct coeff_s {

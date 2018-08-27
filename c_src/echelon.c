@@ -151,23 +151,23 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest,
  * Allocates a new Polynomial and frees the Row.
  */
 
-static inline bool Poly_decompress(Row_t* P, Polynomial_t* Q, int rank, MConstants_t C) {
+static inline bool Poly_decompress(Row_t* src, Polynomial_t* dest, int rank, MConstants_t C) {
   int i, value;
-  *Q = zero_poly;
-  if (!Poly_alloc(Q, P->num_terms, rank)) {
+  *dest = zero_poly;
+  if (!Poly_alloc(dest, src->num_terms, rank)) {
     return false;
   }
-  Q->num_terms = P->num_terms;
+  dest->num_terms = src->num_terms;
   /* Copy the terms and convert the coefficients from the Montgomery
    * representation to the standard representation.
    */
-  for (i = 0; i < Q->num_terms; i++) {
-    Q->terms[i] = P->term_table[P->coefficients[i].column_index];
-    value = montgomery_multiply(P->coefficients[i].value, 1, C.prime, C.mu);
-    Q->coefficients[i].column_index = INDEX_UNSET;
-    Q->coefficients[i].value = value;
+  for (i = 0; i < dest->num_terms; i++) {
+    dest->terms[i] = src->term_table[src->coefficients[i].column_index];
+    value = montgomery_multiply(src->coefficients[i].value, 1, C.prime, C.mu);
+    dest->coefficients[i].column_index = NO_INDEX;
+    dest->coefficients[i].value = value;
   }
-  Row_free(P);
+  Row_free(src);
   return true;
 }
 
@@ -230,7 +230,7 @@ static inline bool row_op(Row_t *f, Row_t *g, Row_t *answer,
                           int g_coeff, int num_pivots, MConstants_t C) {
   int a = f->coefficients->value;
   int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
-  /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X)u. */
+  /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
   int factor = C.prime - montgomery_multiply(a_inverse, g_coeff, C.prime, C.mu);
   if (! Row_p_plus_aq(g, factor, f, answer, C)) {
     return false;
