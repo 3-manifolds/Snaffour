@@ -29,7 +29,8 @@ from __future__ import print_function
 from collections import Iterable, Mapping
 from itertools import combinations, chain
 from libc.stdint cimport int64_t
-from cpython.mem cimport PyMem_Malloc as malloc, PyMem_Realloc as realloc, PyMem_Free as free
+from libc.stdlib cimport malloc, free
+from cpython.mem cimport PyMem_Malloc, PyMem_Realloc, PyMem_Free
 import time, re
 
 cdef extern from "snaffour.h":
@@ -188,11 +189,11 @@ cdef class Term(object):
     cdef public ring
 
     def __cinit__(self):
-        self.c_term = <Term_t*>malloc(sizeof(Term_t))
+        self.c_term = <Term_t*>PyMem_Malloc(sizeof(Term_t))
 
     def __dealloc__(self):
         if self.c_term is not NULL:
-            free(<void*>self.c_term)
+            PyMem_Free(<void*>self.c_term)
 
     def __init__(self, *degree, PolyRing ring=no_ring):
         cdef int i
@@ -656,10 +657,10 @@ cdef class PolyMatrix(object):
 
     def __cinit__(self, poly_list):
         cdef int N = len(poly_list)
-        self.c_heads = <Term_t**>malloc(N*sizeof(Term_t*))
+        self.c_heads = <Term_t**>PyMem_Malloc(N*sizeof(Term_t*))
 
     def __dealloc__(self):
-        free(self.c_heads)
+        PyMem_Free(self.c_heads)
 
     def __init__(self, poly_list):
         cdef Polynomial_t** polys
@@ -1226,7 +1227,7 @@ cdef class Ideal(object):
         cdef int rank = self.ring.rank
         cdef Term t
         cdef Polynomial P
-        cdef Polynomial_t* polys = <Polynomial_t*>malloc(
+        cdef Polynomial_t* polys = <Polynomial_t*>PyMem_Malloc(
             len(poly_list)*sizeof(Polynomial_t))
         for i, P in enumerate(poly_list):
             polys[i] = P.c_poly
@@ -1238,8 +1239,8 @@ cdef class Ideal(object):
             t.c_term[0] = terms[i]
             t.total_degree = Term_total_degree(t.c_term, rank)
             result.append(t)
-        free(terms)
-        free(polys)
+        PyMem_Free(terms)
+        PyMem_Free(polys)
         return result
 
     cdef tails(self, list F):

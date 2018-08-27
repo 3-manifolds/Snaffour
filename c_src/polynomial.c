@@ -32,6 +32,10 @@
 #include "snaffour.h"
 #include <assert.h>
 
+/* Python's memory allocation */
+#include "Python.h"
+#include "pymem.h"
+
 /** Struct to hold the result of an extended gcd computation.
  *
  * For inputs x and y, this struct is meant to hold d, a and b where
@@ -145,10 +149,10 @@ static inline int x_plus_ay_mod(int prime, int x, int a, int y) {
 bool Poly_alloc(Polynomial_t* P, int size, int rank) {
   int old_size = P->max_size;
   if (size > old_size) {
-    if (NULL == (P->terms = realloc(P->terms, sizeof(Term_t)*size))) {
+    if (NULL == (P->terms = PyMem_Realloc(P->terms, sizeof(Term_t)*size))) {
       goto oom;
     }
-    if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size))) {
+    if (NULL == (P->coefficients = PyMem_Realloc(P->coefficients, sizeof(coeff_t)*size))) {
       goto oom;
     }
     P->max_size = size;
@@ -158,8 +162,8 @@ bool Poly_alloc(Polynomial_t* P, int size, int rank) {
   return true;
 
  oom:
-  free(P->terms);
-  free(P->coefficients);
+  PyMem_Free(P->terms);
+  PyMem_Free(P->coefficients);
   return false;
 }
 
@@ -170,8 +174,8 @@ bool Poly_alloc(Polynomial_t* P, int size, int rank) {
  */
 
 void Poly_free(Polynomial_t* P) {
-  free(P->terms);
-  free(P->coefficients);
+  PyMem_Free(P->terms);
+  PyMem_Free(P->coefficients);
   P->num_terms = 0;
   P->rank = 0;
   P->terms = NULL;
@@ -508,7 +512,7 @@ void Poly_sort(Polynomial_t *P, int num_polys, bool increasing) {
 bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_size,
 		int rank) {
   if (num_polys == 1) {
-    *answer = (Term_t*)malloc(P[0].num_terms*sizeof(Term_t));
+    *answer = (Term_t*)PyMem_Malloc(P[0].num_terms*sizeof(Term_t));
     if (*answer == NULL) {
       return false;
     }
@@ -528,12 +532,12 @@ bool Poly_terms(Polynomial_t *P, int num_polys, Term_t **answer, int* answer_siz
     return false;
   }
   if (! Poly_terms(P + left, right, &right_answer, &right_size, rank)) {
-    free(left_answer);
+    PyMem_Free(left_answer);
     return false;
   }
   result = Term_merge(left_answer, right_answer, left_size, right_size,
   		      answer, answer_size, rank);
-  free(left_answer);
-  free(right_answer);
+  PyMem_Free(left_answer);
+  PyMem_Free(right_answer);
   return result;
 }

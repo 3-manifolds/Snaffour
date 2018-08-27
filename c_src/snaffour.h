@@ -235,13 +235,5 @@ typedef struct MConstants_s {
 
 #define M_REDUCE(X, mu, p) ((X + (((X & MOD_R)*mu) & MOD_R)*p) >> 31)
 
-/* Use Python's memory allocation */
-#include "Python.h"
-#include "pymem.h"
-
-#define malloc PyMem_Malloc
-#define realloc PyMem_Realloc
-#define free PyMem_Free
-
 #define F_FOUR_H
 #endif

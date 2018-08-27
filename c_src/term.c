@@ -24,6 +24,10 @@
 
 #include "snaffour.h"
 
+/* Python's memory allocation */
+#include "Python.h"
+#include "pymem.h"
+
 void Term_print(Term_t *t, int rank) {
   char *c = (char *)&t->degree;
   printf("[ ");
@@ -163,7 +167,7 @@ int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
 bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
                        Term_t** answer, int* answer_size, int rank) {
   int size = s_size + t_size, p = 0, q = 0, N = 0, s_td, t_td;
-  Term_t* merged = (Term_t*)malloc(sizeof(Term_t)*size);
+  Term_t* merged = (Term_t*)PyMem_Malloc(sizeof(Term_t)*size);
   if (merged == NULL) {
     *answer_size = 0;
     *answer = NULL;
