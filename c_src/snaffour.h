@@ -129,9 +129,9 @@ typedef struct monomial_array_s {
  */
 
 typedef struct Polynomial_s {
-  int num_terms;          /* How many terms in this Polynomial. */
-  int max_size;           /* How many terms and coefficients the allocated memory will hold. */
-  int rank;               /* The number of variables in the parent polynomial ring. */
+  int num_terms;   /* How many terms are used by this Polynomial. */
+  int max_size;    /* How many terms (and coefficients) have been allocated. */
+  int rank;        /* The rank of the parent polynomial ring. */
   coeff_t* coefficients;
   Term_t* terms;
 } Polynomial_t;
@@ -175,17 +175,14 @@ bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_siz
  */
 
 typedef struct Row_s {
-  int num_terms;          /* How many terms in this Polynomial. */
-  int max_size;           /* How many terms and coefficients the allocated memory will hold. */
-  int flags;
+  int num_terms;   /* How many coefficients are used by this Row. */
+  int max_size;    /* How many coefficients have been allocated. */
   coeff_t* coefficients;
   Term_t* term_table;
 } Row_t;
 
-#define IS_PIVOT_FLAG 1
-#define IS_PIVOT_ROW(row) ((row)->flags & IS_PIVOT_FLAG)
-#define SET_IS_PIVOT_ROW(row) ((row)->flags |= IS_PIVOT_FLAG)
-/**
+/** Arithmetic
+ *
  * When computing echelon forms over Fp, we use the Montgomery representation
  * of a conjugacy class mod p.  Given a class X, its Montgomery representative
  * M(X) is an element of [0, p) such that M(X) is congruent to RX mod p, where
@@ -194,10 +191,11 @@ typedef struct Row_s {
 
 int inverse_mod(int p, int x);
 
-/**
+/** Constants
+ *
  * An MConstant struct holds the constants needed for computing with
  * Montgomery representations, and for converting between standard
- * and Montgomery representations.
+ * and Montgomery representatives.
  */
 
 typedef struct MConstants_s {

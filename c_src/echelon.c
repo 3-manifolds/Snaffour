@@ -149,7 +149,7 @@ static void Row_make_monic(Row_t *P, MConstants_t C) {
  * table containing all of its terms.  The destination should have been
  * initialized to zero.
  */
-static inline bool Poly_compress(Polynomial_t* src, Row_t* dest, Term_t* table,
+static inline bool Poly_to_Row(Polynomial_t* src, Row_t* dest, Term_t* table,
                                  MConstants_t C) {
   int i, value;
   dest->term_table = table;
@@ -172,7 +172,8 @@ static inline bool Poly_compress(Polynomial_t* src, Row_t* dest, Term_t* table,
  * The Polynomial is expanded if necessary and the Row is freed.
  */
 
-static inline bool Poly_decompress(Row_t* src, Polynomial_t* dest, int rank, MConstants_t C) {
+static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
+                               MConstants_t C) {
   int i, value;
   *dest = zero_poly;
   if (!Poly_alloc(dest, src->num_terms, rank)) {
@@ -188,7 +189,6 @@ static inline bool Poly_decompress(Row_t* src, Polynomial_t* dest, int rank, MCo
     dest->coefficients[i].column_index = NO_INDEX;
     dest->coefficients[i].value = value;
   }
-  Row_free(src);
   return true;
 }
 
@@ -214,8 +214,8 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
     return false;
   }
   answer->term_table = P->term_table;
-  p_coeff = P->coefficients[p];
-  q_coeff = Q->coefficients[q];
+  p_coeff = P->coefficients[0];
+  q_coeff = Q->coefficients[0];
   while (p < P->num_terms && q < Q->num_terms) {
     cmp = p_coeff.column_index - q_coeff.column_index;
     if (cmp > 0) { /* deg P[p] > deg Q[q] */
@@ -425,7 +425,7 @@ static bool Poly_matrix_init(Polynomial_t** P, int num_rows, int* num_columns,
   /* Construct the matrix. */
   for (i = 0; i < num_rows; i++) {
     matrix[i] = zero_row;
-    if (!Poly_compress(P[i], matrix + i, table, C)) {
+    if (!Poly_to_Row(P[i], matrix + i, table, C)) {
       for (j = 0; j < i; j++) {
         Row_free(matrix + i);
       }
@@ -482,7 +482,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   Term_t* table = NULL;
   Row_t *row_i, *row_j, *matrix = NULL;
   Row_t buffer = zero_row, tmp;
-  int head, last_pivot = -1;
+  int head, max_head = -1;
   MConstants_t C = montgomery_init(prime);
   
   /* Create the matrix. */
@@ -501,11 +501,11 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     row_i = matrix + i;
     if (row_i->num_terms == 0) continue;
     head = row_i->coefficients->column_index;
-    /* Clear above.  Since head terms are initially non-decreasing, we can skip
-     * this step the first time that a new head term is seen because we know
-     * that the column is already clear above.
+    /* Clear the column above the head term of row i.  Since head terms are
+     * initially non-decreasing, there is nothing to do if the head term
+     * of row i is larger that the head term of all earlier rows.
      */
-    if (head <= last_pivot) {
+    if (head <= max_head) {
       for (j = 0; j < i; j++) {
         row_j = matrix + j;
         if (row_j->num_terms == 0) continue;
@@ -513,15 +513,16 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
           if (! row_op(row_i, row_j, &buffer, coeff, C)) {
             return false;
           }
+        /* Swap row j with the buffer row. */
           tmp = matrix[j];
           matrix[j] = buffer;
           buffer = tmp;
         }
       }
     } else {
-      last_pivot = head;
+      max_head = head;
     }
-    /* Clear below. */
+    /* Clear the column below the head term of row i. */
     for (j = i + 1; j < num_rows; j++) {
       row_j = matrix + j;
       if (row_j->num_terms == 0) continue;
@@ -529,6 +530,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
         if (! row_op(row_i, row_j, &buffer, coeff, C)) {
           return false;
         }
+        /* Swap row j with the buffer row. */
         tmp = matrix[j];
         matrix[j] = buffer;
         buffer = tmp;
@@ -552,13 +554,13 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       Row_free(row_i);
     } else {
       Row_make_monic(row_i, C);
-      /* If decompression is successful, the row will be freed.*/
-      if (!Poly_decompress(row_i, answer + i, rank, C)) {
+      if (!Row_to_Poly(row_i, answer + i, rank, C)) {
         for (j = 0; j <= i; j++) {
           Row_free(matrix + j);
         }
         goto oom;
       }
+      Row_free(row_i);
     }
   }
   free(matrix);
