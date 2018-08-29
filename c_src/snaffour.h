@@ -231,7 +231,7 @@ typedef struct MConstants_s {
  *
  */
 
-#define M_REDUCE(X, mu, p) ((X + (((X & MOD_R)*mu) & MOD_R)*p) >> 31)
+#define M_REDUCE(X, p, mu) ((X + (((X & MOD_R)*mu) & MOD_R)*p) >> 31)
 
 #define F_FOUR_H
 #endif

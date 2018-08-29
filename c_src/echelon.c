@@ -98,7 +98,7 @@ static inline MConstants_t montgomery_init(int prime) {
 
 static inline int montgomery_multiply(int x, int y, int prime, int mu) {
   int64_t x64 = x, y64 = y, prime64 = prime, mu64 = mu, answer64;
-  answer64 = M_REDUCE(x64*y64, mu64, prime64);
+  answer64 = M_REDUCE(x64*y64, prime64, mu64);
   if (answer64 >= prime64) {
     answer64 -= prime64;
   }
@@ -107,9 +107,9 @@ static inline int montgomery_multiply(int x, int y, int prime, int mu) {
 
 static inline int montgomery_inverse(int x, int prime, int mu, int R_cubed) {
   int x_inverse = inverse_mod(prime, x);
-  int64_t R_cubed64 = R_cubed, prime64 = prime, mu64 = mu, answer64;
-  int64_t x_inverse64 = montgomery_multiply(x_inverse, R_cubed, prime, mu);
-  answer64 = M_REDUCE(x_inverse64*R_cubed64, mu64, prime64);
+  int64_t x_inverse64 = x_inverse, R_cubed64 = R_cubed, prime64 = prime, mu64 = mu;
+  /* Montgomery multiply by R^3 to get the Montgomery inverse. */
+  int64_t answer64 = M_REDUCE(x_inverse64*R_cubed64, prime64, mu64);
   if (answer64 >= prime64) {
     answer64 -= prime64;
   }
@@ -118,7 +118,7 @@ static inline int montgomery_inverse(int x, int prime, int mu, int R_cubed) {
 
 static inline int montgomery_x_plus_ay(int x, int a, int y, int prime, int mu) {
   int64_t x64 = x, y64 = y, a64 = a, prime64 = prime, mu64 = mu, answer64;
-  answer64 = M_REDUCE(a64*y64, mu64, prime64);
+  answer64 = M_REDUCE(a64*y64, prime64, mu64);
   if (answer64 >= prime64) {
     answer64 -= prime64;
   }
