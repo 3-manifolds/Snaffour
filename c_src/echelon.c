@@ -29,10 +29,25 @@
 
 #include "snaffour.h"
 
+/* Getter and setter macros for typedef coeff_t row_coeff_t */
+/*
 #define SET_COEFF(x, new_coeff) do {x.value = new_coeff;} while (0)
 #define GET_COEFF(x) (x.value)
 #define SET_COLUMN(x, new_column) do {x.column_index = new_column;} while (0)
 #define GET_COLUMN(x) (x.column_index)
+#define ZERO_COEFF ({ .value : 0, .column_index : 0 }) 
+*/
+
+/* Getter and setter macros for typedef int64_t row_coeff_t */
+#define SET_COEFF(x, new_coeff) do {                            \
+    x = ((int64_t)new_coeff << 32) | (x & 0xffffffffL);         \
+  } while (0)
+#define GET_COEFF(x) ((int)(x >> 32))
+#define SET_COLUMN(x, new_column) do {                  \
+    x = (x & ~0xffffffffL) | ((int64_t)new_column);     \
+  } while (0)
+#define GET_COLUMN(x) ((int)(x & 0xffffffffL))
+#define ZERO_COEFF (0)
 
 /** Global zero values for initialization.
  */
@@ -54,7 +69,8 @@ Row_t zero_row = {.num_terms = 0,
 static bool Row_alloc(Row_t* P, int size) {
   int old_size = P->max_size;
   if (size > old_size) {
-    if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size))) {
+    if (NULL == (P->coefficients = realloc(P->coefficients,
+                                           sizeof(row_coeff_t)*size))) {
       goto oom;
     }
     P->max_size = size;
@@ -140,7 +156,7 @@ static inline int montgomery_x_plus_ay(int x, int a, int y, int prime, int mu) {
  */
 
 static void Row_make_monic(Row_t *P, MConstants_t C) {
-  register coeff_t coeff = P->coefficients[0];
+  register row_coeff_t coeff = P->coefficients[0];
   int N = 0;
   int factor = montgomery_inverse(GET_COEFF(coeff), C.prime, C.mu, C.R_cubed);
   for (N = 0; N < P->num_terms; N++) {
@@ -158,7 +174,7 @@ static void Row_make_monic(Row_t *P, MConstants_t C) {
  */
 static inline bool Poly_to_Row(Polynomial_t* src, Row_t* dest, Term_t* table,
                                  MConstants_t C) {
-  register coeff_t coeff;
+  register row_coeff_t coeff = ZERO_COEFF;
   int i;
   dest->term_table = table;
   /* First make sure there is enough room in the destination. */
@@ -166,9 +182,10 @@ static inline bool Poly_to_Row(Polynomial_t* src, Row_t* dest, Term_t* table,
     return false;
   }
   for (i = 0; i < src->num_terms; i++) {
-    coeff = src->coefficients[i];
     /* Montgomery multiplication by R^2 converts standard to Montgomery. */
-    SET_COEFF(coeff, montgomery_multiply(GET_COEFF(coeff), C.R_squared, C.prime, C.mu));
+    SET_COEFF(coeff, montgomery_multiply(src->coefficients[i].value,
+                                         C.R_squared, C.prime, C.mu));
+    SET_COLUMN(coeff, src->coefficients[i].column_index);
     dest->coefficients[i] = coeff;
   }
   dest->num_terms = src->num_terms;
@@ -182,7 +199,7 @@ static inline bool Poly_to_Row(Polynomial_t* src, Row_t* dest, Term_t* table,
 
 static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
                                MConstants_t C) {
-  register coeff_t coeff;
+  register row_coeff_t coeff;
   int i;
   
   *dest = zero_poly;
@@ -194,9 +211,9 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
     coeff = src->coefficients[i];
     dest->terms[i] = src->term_table[GET_COLUMN(coeff)];
     /* Montgomery multiplication by 1 converts Montgomery to standard. */
-    SET_COEFF(coeff, montgomery_multiply(GET_COEFF(coeff), 1, C.prime, C.mu));
-    SET_COLUMN(coeff, NO_INDEX);
-    dest->coefficients[i] = coeff;
+    int value = montgomery_multiply(GET_COEFF(coeff), 1, C.prime, C.mu);
+    dest->coefficients[i].value = value;
+    dest->coefficients[i].column_index = NO_INDEX;
   }
   return true;
 }
@@ -213,12 +230,12 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
 
 static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
                           MConstants_t C) {
-  coeff_t coeff = Q->coefficients[0];
+  row_coeff_t coeff = Q->coefficients[0];
   int recip = montgomery_inverse(GET_COEFF(coeff), C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
   int factor = C.prime - montgomery_multiply(recip, P_coeff, C.prime, C.mu);
   int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, combined;
-  register coeff_t p_coeff, q_coeff;
+  register row_coeff_t p_coeff, q_coeff;
   if (! Row_alloc(answer, size)) {
     return false;
   }
