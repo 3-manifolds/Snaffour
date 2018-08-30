@@ -177,8 +177,7 @@ bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_siz
 typedef struct Row_s {
   int num_terms;   /* How many coefficients are used by this Row. */
   int max_size;    /* How many coefficients have been allocated. */
-  int* coefficients;
-  int* columns;
+  coeff_t* coefficients;
   Term_t* term_table;
 } Row_t;
 

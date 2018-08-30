@@ -29,6 +29,11 @@
 
 #include "snaffour.h"
 
+#define SET_COEFF(x, new_coeff) do {x.value = new_coeff;} while (0)
+#define GET_COEFF(x) (x.value)
+#define SET_COLUMN(x, new_column) do {x.column_index = new_column;} while (0)
+#define GET_COLUMN(x) (x.column_index)
+
 /** Global zero values for initialization.
  */
 
@@ -40,7 +45,6 @@ Polynomial_t zero_poly = {.num_terms = 0,
 Row_t zero_row = {.num_terms = 0,
                   .max_size = 0,
                   .coefficients = NULL,
-                  .columns = NULL,
                   .term_table = NULL};
 
 /** Memory allocation.
@@ -50,10 +54,7 @@ Row_t zero_row = {.num_terms = 0,
 static bool Row_alloc(Row_t* P, int size) {
   int old_size = P->max_size;
   if (size > old_size) {
-    if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(int)*size))) {
-      goto oom;
-    }
-    if (NULL == (P->columns = realloc(P->columns, sizeof(int)*size))) {
+    if (NULL == (P->coefficients = realloc(P->coefficients, sizeof(coeff_t)*size))) {
       goto oom;
     }
     P->max_size = size;
@@ -63,19 +64,17 @@ static bool Row_alloc(Row_t* P, int size) {
 
  oom:
   free(P->term_table);
-  free(P->columns);
   free(P->coefficients);
   return false;
 }
 
 static void Row_free(Row_t* P) {
   free(P->coefficients);
-  free(P->columns);
   P->num_terms = 0;
   P->coefficients = NULL;
 }
 
-/** Arithmetic with Montgomery representations.
+/** Montgomery arithmetic.
  *
  * Convention: for low-level arithmetic operations we pass the
  * required auxiliary constants as 32 bit int values, rather
@@ -141,11 +140,13 @@ static inline int montgomery_x_plus_ay(int x, int a, int y, int prime, int mu) {
  */
 
 static void Row_make_monic(Row_t *P, MConstants_t C) {
-  int N = 0, a = P->coefficients[0];
-  int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
-  for (N=0; N < P->num_terms; N++) {
-    P->coefficients[N] = montgomery_multiply(
-      a_inverse, P->coefficients[N], C.prime, C.mu);
+  register coeff_t coeff = P->coefficients[0];
+  int N = 0;
+  int factor = montgomery_inverse(GET_COEFF(coeff), C.prime, C.mu, C.R_cubed);
+  for (N = 0; N < P->num_terms; N++) {
+    coeff = P->coefficients[N];
+    SET_COEFF(coeff, montgomery_multiply(factor, GET_COEFF(coeff), C.prime, C.mu));
+    P->coefficients[N] = coeff;
   }
 }
 
@@ -157,17 +158,17 @@ static void Row_make_monic(Row_t *P, MConstants_t C) {
  */
 static inline bool Poly_to_Row(Polynomial_t* src, Row_t* dest, Term_t* table,
                                  MConstants_t C) {
-  int i, coeff;
+  register coeff_t coeff;
+  int i;
   dest->term_table = table;
   /* First make sure there is enough room in the destination. */
   if (!Row_alloc(dest, src->num_terms)) {
     return false;
   }
-  for (i=0; i < src->num_terms; i++) {
-    coeff = src->coefficients[i].value;
-    /* Montgomery multiplication by R^2 converts standard to Montgomery.*/
-    coeff = montgomery_multiply(coeff, C.R_squared, C.prime, C.mu);
-    dest->columns[i] = src->coefficients[i].column_index;
+  for (i = 0; i < src->num_terms; i++) {
+    coeff = src->coefficients[i];
+    /* Montgomery multiplication by R^2 converts standard to Montgomery. */
+    SET_COEFF(coeff, montgomery_multiply(GET_COEFF(coeff), C.R_squared, C.prime, C.mu));
     dest->coefficients[i] = coeff;
   }
   dest->num_terms = src->num_terms;
@@ -181,21 +182,21 @@ static inline bool Poly_to_Row(Polynomial_t* src, Row_t* dest, Term_t* table,
 
 static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
                                MConstants_t C) {
-  int i, coeff;
+  register coeff_t coeff;
+  int i;
+  
   *dest = zero_poly;
   if (!Poly_alloc(dest, src->num_terms, rank)) {
     return false;
   }
   dest->num_terms = src->num_terms;
-  /* Copy the terms and convert the coefficients from the Montgomery
-   * representation to the standard representation.
-   */
   for (i = 0; i < dest->num_terms; i++) {
-    dest->terms[i] = src->term_table[src->columns[i]];
-    /* Montgomery multiplication by 1 converts to a standard representative.*/
-    coeff = montgomery_multiply(src->coefficients[i], 1, C.prime, C.mu);
-    dest->coefficients[i].column_index = NO_INDEX;
-    dest->coefficients[i].value = coeff;
+    coeff = src->coefficients[i];
+    dest->terms[i] = src->term_table[GET_COLUMN(coeff)];
+    /* Montgomery multiplication by 1 converts Montgomery to standard. */
+    SET_COEFF(coeff, montgomery_multiply(GET_COEFF(coeff), 1, C.prime, C.mu));
+    SET_COLUMN(coeff, NO_INDEX);
+    dest->coefficients[i] = coeff;
   }
   return true;
 }
@@ -212,59 +213,54 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
 
 static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
                           MConstants_t C) {
-  int a = Q->coefficients[0];
-  int a_inverse = montgomery_inverse(a, C.prime, C.mu, C.R_cubed);
+  coeff_t coeff = Q->coefficients[0];
+  int recip = montgomery_inverse(GET_COEFF(coeff), C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
-  int factor = C.prime - montgomery_multiply(a_inverse, P_coeff, C.prime, C.mu);
-  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, new_value;
-  int p_coeff, p_column, q_coeff, q_column;
-  
+  int factor = C.prime - montgomery_multiply(recip, P_coeff, C.prime, C.mu);
+  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, combined;
+  register coeff_t p_coeff, q_coeff;
   if (! Row_alloc(answer, size)) {
     return false;
   }
   answer->term_table = P->term_table;
   p_coeff = P->coefficients[0];
-  p_column = P->columns[0];
   q_coeff = Q->coefficients[0];
-  q_column = Q->columns[0];
   while (p < P->num_terms && q < Q->num_terms) {
-    cmp = p_column - q_column;
-    if (cmp > 0) { /* deg P[p] > deg Q[q] */
-      answer->coefficients[N] = p_coeff;
-      answer->columns[N++] = p_column;
-      p_column = P->columns[++p];
-      p_coeff = P->coefficients[p];
-    } else if (cmp < 0) { /* deg P[p] < deg Q[q] */
-      answer->columns[N] = q_column;
-      new_value = montgomery_multiply(factor, q_coeff, C.prime, C.mu);
-      answer->coefficients[N] = new_value;
-      answer->columns[N++] = q_column;
-      q_column = Q->columns[++q];      
-      q_coeff = Q->coefficients[q];
-    } else { /* deg P[p] == deg Q[q] */
+    //cmp = p_coeff.column_index - q_coeff.column_index;
+    cmp = GET_COLUMN(p_coeff) - GET_COLUMN(q_coeff);
+    if (cmp > 0) { /* deg p_coeff > deg q_coeff */
+      answer->coefficients[N++] = p_coeff;
+      p_coeff = P->coefficients[++p];
+    } else if (cmp < 0) { /* deg p_coeff < deg q_coeff */
+      SET_COLUMN(coeff, GET_COLUMN(q_coeff));
+      SET_COEFF(coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
+                                           C.prime, C.mu)); 
+      answer->coefficients[N++] = coeff;
+      q_coeff = Q->coefficients[++q];
+    } else { /* deg p_coeff == deg q_coeff */
       if (q > 0) {/* We know that the head term of Q will cancel. */
-        new_value = montgomery_x_plus_ay(p_coeff, factor, q_coeff, C.prime, C.mu);
-        if (new_value != 0) {
-          answer->coefficients[N] = new_value;
-          answer->columns[N++] = p_column;
+        combined = montgomery_x_plus_ay(GET_COEFF(p_coeff), factor,
+                                        GET_COEFF(q_coeff),
+                                        C.prime, C.mu);
+        if (combined != 0) {
+          SET_COLUMN(coeff, GET_COLUMN(p_coeff));
+          SET_COEFF(coeff, combined);
+          answer->coefficients[N++] = coeff;
         }
       }
-      p_column = P->columns[++p];
-      q_column = Q->columns[++q];
-      p_coeff = P->coefficients[p];
-      q_coeff = Q->coefficients[q];
+      p_coeff = P->coefficients[++p];
+      q_coeff = Q->coefficients[++q];
     }
   }
   /* At most one of these two loops will be non-trivial. */
   for (; q < Q->num_terms; q++, N++) {
     q_coeff = Q->coefficients[q];
-    new_value = montgomery_multiply(factor, q_coeff, C.prime, C.mu);
-    answer->columns[N] = Q->columns[q];
-    answer->coefficients[N] = new_value;
+    SET_COEFF(q_coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
+                                           C.prime, C.mu));
+    answer->coefficients[N] = q_coeff;
   }
   for (; p < P->num_terms; p++, N++) {
     answer->coefficients[N] = P->coefficients[p];
-    answer->columns[N] = P->columns[p];
   }
   answer->num_terms = N;
   return true;
@@ -278,15 +274,13 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
  */
 
 static inline int compare_heads(const void* p1, const void* p2) {
-  Row_t* P1 = (Row_t*)p1;
-  Row_t* P2 = (Row_t*)p2;
-  return P1->columns[0] - P2->columns[0];
+  Row_t *P1 = (Row_t*)p1, *P2 = (Row_t*)p2;
+  return GET_COLUMN(P1->coefficients[0]) - GET_COLUMN(P2->coefficients[0]);
 }
-
+    
 static inline int compare_heads_dec(const void* p1, const void* p2) {
-  Row_t* P1 = (Row_t*)p1;
-  Row_t* P2 = (Row_t*)p2;
-  return P2->columns[0] - P1->columns[0];
+  Row_t *P1 = (Row_t*)p1, *P2 = (Row_t*)p2;
+  return GET_COLUMN(P2->coefficients[0]) - GET_COLUMN(P1->coefficients[0]);
 }
 
 /** Merge two arrays of monomials.
@@ -469,15 +463,15 @@ static inline bool coeff_in_column(Row_t* P, int column, int bottom,
                                    int top, int* coefficient) {
   int middle;
   if (top - bottom == 1) {
-    if (column == P->columns[bottom]) {
-	*coefficient = P->coefficients[bottom];
-	return true;
-      } else {
-	return false;
-      }
+    if (column == GET_COLUMN(P->coefficients[bottom])) {
+      *coefficient = GET_COEFF(P->coefficients[bottom]);
+      return true;
+    } else {
+      return false;
+    }
   }
   middle = (top + bottom) >> 1;
-  if (P->columns[middle] < column) {
+  if (GET_COLUMN(P->coefficients[middle]) < column) {
     return coeff_in_column(P, column, bottom, middle, coefficient);
   } else {
     return coeff_in_column(P, column, middle, top, coefficient);
@@ -495,7 +489,7 @@ static inline bool coeff_in_column(Row_t* P, int column, int bottom,
 
 bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
                   int* num_columns, int prime, int rank) {
-  int i, j, coeff;
+  int i, j, target;
   Term_t* table = NULL;
   Row_t *row_i, *row_j, *matrix = NULL;
   Row_t buffer = zero_row, tmp;
@@ -517,7 +511,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   for (i = 0; i < num_rows; i++) {
     row_i = matrix + i;
     if (row_i->num_terms == 0) continue;
-    head = row_i->columns[0];
+    head = GET_COLUMN(row_i->coefficients[0]);
     /* Clear the column above the head term of row i.  Since head terms are
      * initially non-decreasing, there is nothing to do if the head term
      * of row i is larger that the head term of all earlier rows.
@@ -526,8 +520,8 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
       for (j = 0; j < i; j++) {
         row_j = matrix + j;
         if (row_j->num_terms == 0) continue;
-        if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-          if (! row_op(row_i, row_j, &buffer, coeff, C)) {
+        if (coeff_in_column(row_j, head, 0, row_j->num_terms, &target)) {
+          if (! row_op(row_i, row_j, &buffer, target, C)) {
             return false;
           }
         /* Swap row j with the buffer row. */
@@ -543,8 +537,8 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     for (j = i + 1; j < num_rows; j++) {
       row_j = matrix + j;
       if (row_j->num_terms == 0) continue;
-      if (coeff_in_column(row_j, head, 0, row_j->num_terms, &coeff)) {
-        if (! row_op(row_i, row_j, &buffer, coeff, C)) {
+      if (coeff_in_column(row_j, head, 0, row_j->num_terms, &target)) {
+        if (! row_op(row_i, row_j, &buffer, target, C)) {
           return false;
         }
         /* Swap row j with the buffer row. */
