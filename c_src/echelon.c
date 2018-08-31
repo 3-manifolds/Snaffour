@@ -230,56 +230,57 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
 
 static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
                           MConstants_t C) {
-  row_coeff_t coeff = Q->coefficients[0];
-  int recip = montgomery_inverse(GET_COEFF(coeff), C.prime, C.mu, C.R_cubed);
+  int inv = montgomery_inverse(GET_COEFF(Q->coefficients[0]),
+                               C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
-  int factor = C.prime - montgomery_multiply(recip, P_coeff, C.prime, C.mu);
-  int size = P->num_terms + Q->num_terms, p = 0, q = 0, N = 0, cmp, combined;
+  int factor = C.prime - montgomery_multiply(inv, P_coeff, C.prime, C.mu);
+  int size = P->num_terms + Q->num_terms, cmp, combined;
   register row_coeff_t p_coeff, q_coeff;
+  register row_coeff_t *p_ptr = P->coefficients, *q_ptr = Q->coefficients;
+  register row_coeff_t *ans_ptr;
   if (! Row_alloc(answer, size)) {
     return false;
   }
   answer->term_table = P->term_table;
-  p_coeff = P->coefficients[0];
-  q_coeff = Q->coefficients[0];
-  while (p < P->num_terms && q < Q->num_terms) {
-    //cmp = p_coeff.column_index - q_coeff.column_index;
+  ans_ptr = answer->coefficients;
+  p_coeff = *p_ptr;
+  q_coeff = *q_ptr;
+  while (p_ptr - P->coefficients < P->num_terms &&
+         q_ptr - Q->coefficients < Q->num_terms) {
     cmp = GET_COLUMN(p_coeff) - GET_COLUMN(q_coeff);
     if (cmp > 0) { /* deg p_coeff > deg q_coeff */
-      answer->coefficients[N++] = p_coeff;
-      p_coeff = P->coefficients[++p];
+      *ans_ptr++ = p_coeff;
+      p_coeff = *++p_ptr;
     } else if (cmp < 0) { /* deg p_coeff < deg q_coeff */
-      SET_COLUMN(coeff, GET_COLUMN(q_coeff));
-      SET_COEFF(coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
-                                           C.prime, C.mu)); 
-      answer->coefficients[N++] = coeff;
-      q_coeff = Q->coefficients[++q];
+      SET_COEFF(q_coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
+                                           C.prime, C.mu));
+      *ans_ptr++ = q_coeff;
+      q_coeff = *++q_ptr;
     } else { /* deg p_coeff == deg q_coeff */
-      if (q > 0) {/* We know that the head term of Q will cancel. */
+      if (q_ptr > Q->coefficients) {/* We know that the head term of Q will cancel. */
         combined = montgomery_x_plus_ay(GET_COEFF(p_coeff), factor,
                                         GET_COEFF(q_coeff),
                                         C.prime, C.mu);
         if (combined != 0) {
-          SET_COLUMN(coeff, GET_COLUMN(p_coeff));
-          SET_COEFF(coeff, combined);
-          answer->coefficients[N++] = coeff;
+          SET_COEFF(p_coeff, combined);
+          *ans_ptr++ = p_coeff;
         }
       }
-      p_coeff = P->coefficients[++p];
-      q_coeff = Q->coefficients[++q];
+      p_coeff = *++p_ptr;
+      q_coeff = *++q_ptr;
     }
   }
   /* At most one of these two loops will be non-trivial. */
-  for (; q < Q->num_terms; q++, N++) {
-    q_coeff = Q->coefficients[q];
+  while (q_ptr - Q->coefficients < Q->num_terms) {
+    q_coeff = *q_ptr++;
     SET_COEFF(q_coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
                                            C.prime, C.mu));
-    answer->coefficients[N] = q_coeff;
+    *ans_ptr++ = q_coeff;
   }
-  for (; p < P->num_terms; p++, N++) {
-    answer->coefficients[N] = P->coefficients[p];
+  while (p_ptr - P->coefficients < P->num_terms) {
+    *ans_ptr++ = *p_ptr++;
   }
-  answer->num_terms = N;
+  answer->num_terms = ans_ptr - answer->coefficients;
   return true;
 }
 
