@@ -13,7 +13,7 @@ version = re.search("__version__ = '(.*)'",
                     open('python_src/__init__.py').read()).group(1)
 
 extra_link_args = []
-extra_compile_args=['-msse2', '-O3', '-funroll-loops']
+extra_compile_args=['-msse4', '-O3', '-funroll-loops', '-flax-vector-conversions']
 
 F4base = Extension(
     name = 'snaffour.F4base',

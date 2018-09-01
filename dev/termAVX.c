@@ -22,13 +22,51 @@
  *   Author homepage: http://www.unhyperbolic.org/
  */
 
-#include "snaffour.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
 
 #include <immintrin.h>
 
-/* Python's memory allocation */
-#include "Python.h"
-#include "pymem.h"
+/*
+gcc -o termtest -mavx2 -flax-vector-conversions -O3 termAVX.c
+*/
+
+/** A Term32_t is an array of 32 chars representing exponents.
+ *
+ * Assigning the vector_size attribute enables gcc to use the 256-bit AVX
+ * registers to do arithmetic operations on all 32 bytes in a single
+ * instruction.  This is meant to optimize operations such as multiplying
+ * or dividing Terms.
+ */
+
+typedef char Term32_t __attribute__ ((vector_size (32)));
+
+/** Terms
+ *
+ * We use a Term32_t vector to allow up to 32 variables.  For computing
+ * Ptolemy varieties, 16 variables would not be enough.
+ *
+ * Wrapping the Term32_t in a struct makes Cython easier to deal with.
+ */
+typedef struct Term_s {
+  Term32_t degree;
+} Term_t;
+
+void Term_print(Term_t *t, int rank);
+bool Term_equals(Term_t* t, Term_t* s);
+int  Term_total_degree(Term_t *t, int rank);
+bool Term_divides(Term_t* t, Term_t* s);
+bool Term_divide(Term_t *t, Term_t *s, Term_t *answer);
+void Term_multiply(Term_t *t, Term_t *s, Term_t *answer);
+void Term_lcm(Term_t *t, Term_t *s, Term_t *answer);
+void Term_gcd(Term_t *t, Term_t *s, Term_t *answer);
+int  Term_revlex_diff(Term_t *t, Term_t *s, int rank);
+long Term_hash(Term_t *t);
+bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
+		Term_t** answer, int* answer_size, int rank);
 
 void Term_print(Term_t *t, int rank) {
   char *c = (char *)&t->degree;
@@ -58,18 +96,38 @@ long Term_hash(Term_t *t)
   return (long)x;
 }
 
-#define IS_ZERO_VECTOR(X) (_mm_testc_si128(_mm_setzero_si128(), (__m128i)X))
+static inline bool is_zero_vector(Term32_t T) {
+  Term32_t ones = (ones == ones);
+  if (!_mm256_testz_si256((__m256i)T, ones)) {
+    return true;
+  }
+  return false;
+}
 
 /* Does t equal s? */
 bool Term_equals(Term_t *t, Term_t *s) {
-  for (int i = 0; i < 2; i++) {
-    Term16_t diff = (t->degree[i] - s->degree[i]);
-    if (!IS_ZERO_VECTOR(diff)) {
-      return false;
-    }
-  }
-  return true;
+  Term32_t result = (t->degree - s->degree);
+  return !is_zero_vector(result);
 }
+
+/* stack overflow suggestion
+  //  Term32_t ones = _mm256_set1_epi8(-1);
+
+
+uint16_t sum_32(const uint8_t a[32])
+{
+    __m128i zero = _mm_xor_si128(zero, zero);
+    __m128i sum0 = _mm_sad_epu8(
+                        zero,
+                        _mm_load_si128(reinterpret_cast<const __m128i*>(a)));
+    __m128i sum1 = _mm_sad_epu8(
+                        zero,
+                        _mm_load_si128(reinterpret_cast<const __m128i*>(&a[16])));
+    __m128i sum2 = _mm_add_epi16(sum0, sum1);
+    __m128i totalsum = _mm_add_epi16(sum2, _mm_shuffle_epi32(sum2, 2));
+    return totalsum.m128i_u16[0];
+}
+*/
 
 int Term_total_degree(Term_t *t, int rank) {
   char *c = (char *)&t->degree;
@@ -80,56 +138,49 @@ int Term_total_degree(Term_t *t, int rank) {
   return degree;
 }
 
-
 /* Does t divide s? */
 bool Term_divides(Term_t *t, Term_t *s) {
     /* Return false if any power in t is larger than the corresponding
      * power in s
     */
-  for (int i = 0; i < 2; i++) {
-    Term16_t cmp = (t->degree[i] > s->degree[i]);
-    if (!IS_ZERO_VECTOR(cmp)) {
-      return false;
-    }
+  Term32_t result = (t->degree > s->degree);
+  int64_t *L = (int64_t *) &result;
+  if ( L[0] != 0 || L[1] != 0 || L[2] != 0 || L[3] != 0) {
+    return false;
   }
   return true;
 }
 
 /* Divide t by s, if possible, and report success. */
 bool Term_divide(Term_t *t, Term_t *s, Term_t *answer) {
-  Term16_t failures;
-  for (int i = 0; i < 2; i++) {
-    answer->degree[i] = t->degree[i] - s->degree[i];
-    failures = (answer->degree[i] < 0);
-    if (!IS_ZERO_VECTOR(failures)) {
-      return false;
-    }
+  Term32_t failure;
+  answer->degree = t->degree - s->degree;
+  failure = (answer->degree < 0);
+  int64_t *L = (int64_t *) &failure;
+  if ( L[0] != 0 || L[1] != 0 || L[2] != 0 || L[3] != 0) {
+    return false;
   }
   return true;
 }
 
 /* Multiply t by s */
 void Term_multiply(Term_t *t, Term_t *s, Term_t *answer) {
-  for (int i = 0; i < 2; i++) {
-    answer->degree[i] = t->degree[i] + s->degree[i];
-  }
+    answer->degree = t->degree + s->degree;
 }
 
 /* Compute the least common multiple of t and s. */
 void Term_lcm(Term_t *t, Term_t *s, Term_t *answer) {
-  for (int i = 0; i < 2; i++) {
-    Term16_t t_bigger = (t->degree[i] >= s->degree[i]);
-    Term16_t s_bigger = (t->degree[i] < s->degree[i]);
-    answer->degree[i] = (t->degree[i] & t_bigger) | (s->degree[i] & s_bigger);
-  }
+  Term32_t t_bigger = (t->degree >= s->degree);
+  Term32_t s_bigger = (t->degree < s->degree);
+  answer->degree = (t->degree & t_bigger) | (s->degree & s_bigger);
 }
 
 /* Compute the greatest common divisor of t and s. */
 void Term_gcd(Term_t *t, Term_t *s, Term_t *answer) {
   for (int i = 0; i < 2; i++) {
-    Term16_t t_smaller = (t->degree[i] <= s->degree[i]);
-    Term16_t s_smaller = (t->degree[i] > s->degree[i]);
-    answer->degree[i] = (t->degree[i] & t_smaller) | (s->degree[i] & s_smaller);
+    Term32_t t_smaller = (t->degree <= s->degree);
+    Term32_t s_smaller = (t->degree > s->degree);
+    answer->degree = (t->degree & t_smaller) | (s->degree & s_smaller);
   }
 }
 
@@ -141,16 +192,9 @@ void Term_gcd(Term_t *t, Term_t *s, Term_t *answer) {
 
 int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
   int i = rank;
-  Term16_t termdiff;
+  Term32_t termdiff;
   char* diff = (char*)&termdiff;
-  if (i > 16) {
-    termdiff = t->degree[1] - s->degree[1];
-    while (i >= 16 && diff[i - 16] == 0) {i--;}
-    if (i >= 16) {
-      return diff[i - 16];
-    }
-  }
-  termdiff = t->degree[0] - s->degree[0];
+  termdiff = t->degree - s->degree;
   while (i >= 0 && diff[i] == 0) {i--;}
   if (i >= 0) {
     return diff[i];
@@ -168,7 +212,7 @@ int Term_revlex_diff(Term_t *t, Term_t *s, int rank) {
 bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
                        Term_t** answer, int* answer_size, int rank) {
   int size = s_size + t_size, p = 0, q = 0, N = 0, s_td, t_td;
-  Term_t* merged = (Term_t*)PyMem_Malloc(sizeof(Term_t)*size);
+  Term_t* merged = (Term_t*)aligned_alloc(32, sizeof(Term_t)*size);
   if (merged == NULL) {
     *answer_size = 0;
     *answer = NULL;
@@ -201,4 +245,22 @@ bool Term_merge(Term_t* s, Term_t* t, int s_size, int t_size,
   *answer_size = N;
   *answer = merged;
   return true;
+}
+
+int main(int argc, char **argv) {
+  Term_t X, Y, Z;
+  int rank = 5;
+  Term32_t a = {1,2,3,4,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  Term32_t b = {1,2,3,4,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  Term32_t c = {1,2,3,4,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+  X.degree = a;
+  Y.degree = b;
+  Z.degree = c;
+  Term_print(&X, rank);
+  Term_print(&Y, rank);
+  Term_print(&Z, rank);
+  printf("\nX %s Y\n", Term_equals(&X, &Y)? "==" : "!=");
+  printf("\nX %s Z\n", Term_equals(&X, &Z)? "==" : "!=");
+  
+  return 0;
 }
