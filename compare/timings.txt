@@ -1,11 +1,11 @@
-laptop:  core-i7 dual core @ 1.80GHz with 1666MHz RAM
-desktop: core-i5 quad core @ 2.67GHz with 1333MHz RAM
+laptop:  core-i7 dual core @ 1.80GHz with 1666MHz RAM (AVX magma)
+desktop: core-i5 quad core @ 2.67GHz with 1333MHz RAM (SSE magma)
 
 Field of order P = 2^31 - 1
 
               laptop    desktop    laptop     desktop
               Cyclic-7  Cyclic-7   Cyclic-8   Cyclic-8
 
-magma         3.32 s    5.71 s     111 s      170 s
+magma         3.25 s    5.71 s     107.4 s    170 s
 
 snaffour      1.77 s    3.05 s     54.2 s     84 s

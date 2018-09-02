@@ -257,14 +257,12 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
       *ans_ptr++ = q_coeff;
       q_coeff = *++q_ptr;
     } else { /* deg p_coeff == deg q_coeff */
-      if (q_ptr > Q->coefficients) {/* We know that the head term of Q will cancel. */
-        combined = montgomery_x_plus_ay(GET_COEFF(p_coeff), factor,
-                                        GET_COEFF(q_coeff),
-                                        C.prime, C.mu);
-        if (combined != 0) {
-          SET_COEFF(p_coeff, combined);
-          *ans_ptr++ = p_coeff;
-        }
+      combined = montgomery_x_plus_ay(GET_COEFF(p_coeff), factor,
+                                      GET_COEFF(q_coeff),
+                                      C.prime, C.mu);
+      if (combined != 0) {
+        SET_COEFF(p_coeff, combined);
+        *ans_ptr++ = p_coeff;
       }
       p_coeff = *++p_ptr;
       q_coeff = *++q_ptr;
