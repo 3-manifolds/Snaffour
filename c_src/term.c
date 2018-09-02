@@ -71,15 +71,37 @@ bool Term_equals(Term_t *t, Term_t *s) {
   return true;
 }
 
-int Term_total_degree(Term_t *t, int rank) {
-  char *c = (char *)&t->degree;
-  int i, degree = 0;
-  for (i = 0; i < rank; i++) {
-    degree += c[i];
-  }
-  return degree;
-}
+/** Compute the total degree of a Term.
+ *
+ * We use SSE4 intrinsics to compute the sum.  This assumes that all vector
+ * entries with index >= rank are zero and that all exponents are non-negative.
+ */
 
+typedef uint16_t v16us __attribute__ ((vector_size (16)));
+
+int Term_total_degree(Term_t *t, int rank)
+{
+  uint8_t* V = (uint8_t*)&t->degree;
+  __m128i sum, sum0, sum1, sum2;
+  /*_mm_sad_epu8 inputs two vectors of bytes and outputs a vector of shorts:
+   * [a0, ..., a16], [b0, ..., b16] ->
+   * [(|a0-b0| + ... + |a7-b7|, 0, 0, 0, |a8-b8| + ... + |a15-b15|, 0, 0, 0]
+   *
+   * _mm_shuffle_epi32(X, mask) does a mapping of the 32bit ints in X specified
+   * by the bytes of mask, in reverse order.  So mask = 2 means [a0,a1,a2,a3] ->
+   * [a2, a0, a0, a0].
+   */
+  if (rank <= 16) {
+    sum0 = _mm_sad_epu8(_mm_setzero_si128(), _mm_load_si128((__m128i*)V));
+    sum = _mm_add_epi16(sum0, _mm_shuffle_epi32(sum0, 2));
+  } else {
+    sum0 = _mm_sad_epu8(_mm_setzero_si128(), _mm_load_si128((__m128i*)V));
+    sum1 = _mm_sad_epu8(_mm_setzero_si128(), _mm_load_si128((__m128i*)(V+16)));
+    sum2 = _mm_add_epi16(sum0, sum1);
+    sum = _mm_add_epi16(sum2, _mm_shuffle_epi32(sum2, 2));
+  }
+  return (int)((v16us)sum)[0];
+}
 
 /* Does t divide s? */
 bool Term_divides(Term_t *t, Term_t *s) {
