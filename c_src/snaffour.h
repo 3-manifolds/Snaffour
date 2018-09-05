@@ -207,6 +207,7 @@ typedef struct MConstants_s {
   int R_mod_p;
   int R_squared;
   int R_cubed;
+  int64_t Rp64;
 } MConstants_t;
 
 #define M_RADIX (1 << 31)
@@ -224,8 +225,8 @@ typedef struct MConstants_s {
  * can be done without using hardware division.
  *
  * Given X in [0, p^2) the following macro computes an element of [0, 2p)
- * representing X/R in Fp. It requires a precomputed constant mu in [0, p)
- * such that mu represents -1/R in Fp.  (Hardware division can by used to
+ * representing X/R in Fp. It requires a precomputed constant mu in [0, R)
+ * such that mu represents -1/p mod R.  (Hardware division can by used to
  * compute mu, since it is only done once per echelon form.)  The macro uses 2
  * multiplies, 2 AND operations 1 addition and a shift.  At most one extra
  * subtraction is needed to compute the standard representative of X/R in Fp.
