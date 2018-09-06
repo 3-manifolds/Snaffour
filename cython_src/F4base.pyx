@@ -70,19 +70,24 @@ cdef extern from "snaffour.h":
     cdef void Poly_free(Polynomial_t* P)
     cdef void Poly_copy(Polynomial_t* src, Polynomial_t* dest)
     cdef void Poly_print(Polynomial_t* P, int rank)
-    cdef void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient, int rank)
+    cdef void Poly_new_term(Polynomial_t* P, Term_t* term, coeff_t coefficient,
+                            int rank)
     cdef bool Poly_equals(Polynomial_t* P, Polynomial_t *Q)
-    cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
-    cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer, int prime, int rank)
+    cdef bool Poly_add(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
+                       int prime, int rank)
+    cdef bool Poly_sub(Polynomial_t* P, Polynomial_t* Q, Polynomial_t* answer,
+                       int prime, int rank)
     cdef int  Poly_coeff(Polynomial_t* P, Term_t* t, int rank)
     cdef void Poly_make_monic(Polynomial_t* P, int prime, int rank)
-    cdef bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows, int* num_columns,
-                           int prime, int rank)
-    cdef bool Poly_times_term(Polynomial_t* P, Term_t* t, Polynomial_t* answer, int prime, int rank)
-    cdef bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer, int prime, int rank)
+    cdef bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
+                           int* num_columns, int prime, int rank)
+    cdef bool Poly_times_term(Polynomial_t* P, Term_t* t, Polynomial_t* answer,
+                              int prime, int rank)
+    cdef bool Poly_times_int(Polynomial_t* P, int a, Polynomial_t* answer,
+                             int prime, int rank)
     cdef void Poly_sort(Polynomial_t* P, int num_polys, bool increasing)
-    cdef bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer, int* answer_size,
-                         int rank);
+    cdef bool Poly_terms(Polynomial_t* P, int num_polys, Term_t** answer,
+                         int* answer_size, int rank);
 
 cdef extern from "Python.h":
     pass
@@ -263,7 +268,8 @@ cdef class Term(object):
 
     def __mul__(self, other):
         cdef Term left, right, answer
-        if isinstance(self, Term) and isinstance(other, Term) and self.ring is other.ring:
+        if (isinstance(self, Term) and isinstance(other, Term)
+            and self.ring is other.ring):
             left, right = self, other
             answer = Term(ring=left.ring)
             Term_multiply(left.c_term, right.c_term, answer.c_term)
@@ -343,17 +349,21 @@ cdef class Monomial(object):
         if isinstance(self, int) and isinstance(other, Monomial):
             coeff = other.ring.reduce_coeff(self*other.coefficient)
             return Monomial(*other.degree, coefficient=coeff, ring=other.ring)
-        elif isinstance(self, Term) and isinstance(other, Monomial) and self.ring is other.ring:
+        elif (isinstance(self, Term) and isinstance(other, Monomial)
+              and self.ring is other.ring):
             return Monomial(*((self*other.term).degree),
                             coefficient=other.coefficient,
                             ring=self.ring)
-        elif isinstance(self, Monomial) and isinstance(other, Term) and self.ring is other.ring:
+        elif (isinstance(self, Monomial) and isinstance(other, Term)
+              and self.ring is other.ring):
             return Monomial(*((self.term*other).degree),
                             coefficient=self.coefficient,
                             ring=other.ring)
-        elif isinstance(self, Monomial) and isinstance(other, Monomial) and self.ring is other.ring:
+        elif (isinstance(self, Monomial) and isinstance(other, Monomial)
+              and self.ring is other.ring):
             return Monomial(*((self.term*other.term).degree),
-                            coefficient=self.ring.reduce_coeff(self.coefficient*other.coefficient),
+                            coefficient=self.ring.reduce_coeff(
+                                self.coefficient*other.coefficient),
                             ring=self.ring)
         else:
             return NotImplemented
@@ -961,9 +971,10 @@ cdef class Ideal(object):
           * G, a list of polynomials (to eventually be extended to a Groebner basis).
 
         OUTPUT:
-          * F, a list of polynomials whose echelon form will contain the simplfication
-            of the reduction modulo G of the s-polynomial of each pair, or the
-            reduction of the equivalent s-polynomial of the simplified pair.
+        * F, a list of polynomials whose echelon form will contain the
+          simplfication of the reduction modulo G of the s-polynomial of each
+          pair, or the reduction of the equivalent s-polynomial of the
+          simplified pair.
         """
         cdef Term t, t1, t2
         cdef Term t_over_ghead = Term(ring=self.ring)
@@ -1154,12 +1165,13 @@ cdef class Ideal(object):
           divides the monomial :math:`m`"
 
         By "previously computed row" he means a row of of an echelon form
-        :math:`\tilde F_j`.  The example suggests that he means that (t, f) should be
-        replaced by (u, g) where g is a previously computed row and HT(t*f) =
-        HT((u*g) with u < t.  The pseudocode in the paper generates (u, g) such
-        that u|t and the proof of Lemma 2.3 assumes that u|t, but the statement
-        does not assert it.  It is unclear whether he only needs the statement
-        of the Lemma, of if he actually uses the proof at some point.
+        :math:`\tilde F_j`.  The example suggests that he means that (t, f)
+        should be replaced by (u, g) where g is a previously computed row and
+        HT(t*f) = HT((u*g) with u < t.  The pseudocode in the paper generates
+        (u, g) such that u|t and the proof of Lemma 2.3 assumes that u|t, but
+        the statement does not assert it.  It is unclear whether he only needs
+        the statement of the Lemma, of if he actually uses the proof at some
+        point.
 
         Third, the algorithm, as presented, enters an infinite loop if passed a
         pair (t,f) with f in F and f in F_ech but t != 1.  In that case u = 1,
@@ -1196,22 +1208,23 @@ cdef class Ideal(object):
                     # Search for u, a divisor of t, such that u*HT(q) = HT(f)
                     if (Term_divide(c_heads[i], q_head.c_term, &u) and
                         Term_divide(t.c_term, &u, t_over_u.c_term)):
-                        # Make t_over_u a valid Term by adding its total_degree attribute.
-                        t_over_u.total_degree = Term_total_degree(t_over_u.c_term, rank)
+                        # Make t_over_u a valid Term by setting its total_degree.
+                        t_over_u.total_degree = Term_total_degree(t_over_u.c_term,
+                                                                  rank)
                         f = rows[i]
                         if Term_equals(t.c_term, &u):
                             # t // u == 1:  No further reduction is possible.
                             return (t_over_u, f)
                         elif Term_equals(t.c_term, t_over_u.c_term):
-                            # t // u == t:  Avoid infinite recursion, but continue to
-                            # look for something better.
+                            # t // u == t: Avoid infinite recursion, but
+                            # continue to look for something better.
                             result = (t, f)
                             continue
                         else:
                             # Recursively search for a simpler pair.
                             return self.simplify(t_over_u, f)
-                    # Since we sort the echelon forms, we can bail as soon as we hit
-                    # a head term < q_head.
+                    # Since we sort the echelon forms, we can bail as soon as
+                    # we hit a head term < q_head.
                     if Term_total_degree(c_heads[i], rank) < q_degree:
                         break
         return result
@@ -1239,14 +1252,15 @@ cdef class Ideal(object):
         right polynomial divides the head term of the left.  Moreover, the total
         degree of these few pairs is the same as the previous total degree.
 
-        It is not clear where these pairs come from, but they cause wasted time.
-        So, for now, when this situation arises, we increase the cutoff degree until
-        we find more interesting pairs.
+        It is not clear where these pairs come from, but they cause wasted
+        time.  So, for now, when this situation arises, we increase the cutoff
+        degree until we find more interesting pairs.
         """
         d = min(p.lcm.total_degree for p in pairs)
         selected = {p for p in pairs if p.lcm.total_degree == d}
         while (len(selected) < len(pairs) and
-               set((True,)) == {p.right_head.divides(p.left_head) for p in selected}):
+               set((True,)) == {p.right_head.divides(p.left_head)
+                                for p in selected}):
             d += 1
             selected |= {p for p in pairs if p.lcm.total_degree == d}
         if self.verbosity > 0:
