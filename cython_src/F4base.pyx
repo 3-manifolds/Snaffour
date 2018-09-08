@@ -661,14 +661,6 @@ cdef class PolyMatrix(object):
     cdef public float elapsed
     cdef public tuple rows       # The Polynomials as rows of the echelon form
     cdef public dict heads       # The set of head terms of the rows
-    cdef Term_t** c_heads        # The head terms, accessible as a C array
-
-    def __cinit__(self, poly_list):
-        cdef int N = len(poly_list)
-        self.c_heads = <Term_t**>PyMem_Malloc(N*sizeof(Term_t*))
-
-    def __dealloc__(self):
-        PyMem_Free(self.c_heads)
 
     def __init__(self, poly_list):
         cdef Polynomial_t** polys
@@ -695,20 +687,21 @@ cdef class PolyMatrix(object):
             raise RuntimeError('Out of memory')
         self.elapsed = time.time() - start
         rows = []
+        self.heads = {}
         m = 0
-        # Construct the list of rows
+        # Construct the list of rows and the dict head mapping head_terms
+        # to rows.
         for n in range(N):
             c_poly = answer[n]
             if c_poly.num_terms > 0:
-                self.c_heads[m] = c_poly.terms
                 f = Polynomial(ring=self.ring)
                 f.c_poly = c_poly
                 f.decorate()
                 rows.append(f)
+                self.heads[f.head_term] = f
                 m += 1
         self.num_rows = m
         self.rows = tuple(rows)
-        self.heads = {f.head_term : f for f in self.rows}
         free(answer)
         free(polys)
 
@@ -985,7 +978,7 @@ cdef class Ideal(object):
         cdef int G_size = len(G)
         cdef int i, errors
         S = []
-        errors = 0
+        trivial = 0
         for h_pair, g_pair in zip(*L):
             t1, f1 = s1 = self.simplify(*h_pair)
             t2, f2 = s2 = self.simplify(*g_pair)
@@ -997,11 +990,11 @@ cdef class Ideal(object):
             if (t1.total_degree == t2.total_degree == 0 and
                 Term_equals(f1.c_poly.terms, f2.c_poly.terms)):
                 S.extend((self.mult(h_pair), self.mult(s2)))
-                errors += 1
+                trivial += 1
             else:
                 S.extend((self.mult(s1), self.mult(s2)))
         if self.verbosity > 0:
-            print('%d trivial s-polys;'%errors, end=' ')
+            print('%d trivial s-polys;'%trivial, end=' ')
         tails = self.tails(S)
         for t in tails:
             for g in G:
