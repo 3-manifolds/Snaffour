@@ -1175,27 +1175,28 @@ cdef class Ideal(object):
         Third, the algorithm, as presented, enters an infinite loop if passed a
         pair (t,f) with f in F and f in F_ech but t != 1.  In that case u = 1,
         since 1*f is in F, so u != t and f = p and the algorithm says to
-        recursively call simplify(t/u, f) with t/u = t.  We need to handle this
-        by stopping the recursion in this case.
+        recursively call simplify(t/u, f) with t/u = t.  This does not arise in
+        this implementation since we avoid recursion altogether.
         """
         cdef Term head = q.head_term * t
-        cdef Term s, u
+        cdef Term u = self.ring.Term()
+        cdef Term s
         cdef PolyMatrix F_ech
         cdef list echelons = self.echelons
         cdef tuple gens = self.ring.gen_terms
         
         # Empirically, simplify almost always returns a pair (s, f) where s
         # has total degree 0 or 1.  So, for efficiency, we simply check for
-        # these cases and if nothing is found, return the unsimplified input
-        # pair.
-        
+        # these two cases and if nothing is found, return the unsimplified
+        # input pair.
         for F_ech in echelons: 
             heads = F_ech.heads
             if head in heads:
                 return (self.ring.Term(), heads[head])
             for s in gens:
-                if s.divides(t):
-                    u = head // s
+                if Term_divides(s.c_term, t.c_term):
+                    Term_divide(head.c_term, s.c_term, u.c_term)
+                    u.total_degree = Term_total_degree(u.c_term, self.ring.rank)
                     if u in heads:
                         return (s, heads[u])
         return (t, q)
@@ -1213,6 +1214,8 @@ cdef class Ideal(object):
         """
         s = sorted(pairs, key=lambda p: p.lcm.total_degree)
         return set((s[0],))
+        # A more random version ..
+        # return set((set(pairs).pop(),))
 
     def normal_select(self, pairs):
         """
