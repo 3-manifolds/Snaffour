@@ -245,8 +245,8 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   ans_ptr = answer->coefficients;
   p_coeff = *p_ptr;
   q_coeff = *q_ptr;
-  while (p_ptr - P->coefficients < P->num_terms &&
-         q_ptr - Q->coefficients < Q->num_terms) {
+  while (p_ptr < P->coefficients + P->num_terms &&
+         q_ptr < Q->coefficients + Q->num_terms) {
     cmp = GET_COLUMN(p_coeff) - GET_COLUMN(q_coeff);
     if (cmp > 0) { /* deg p_coeff > deg q_coeff */
       *ans_ptr++ = p_coeff;
@@ -269,13 +269,13 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
     }
   }
   /* At most one of these two loops will be non-trivial. */
-  while (q_ptr - Q->coefficients < Q->num_terms) {
+  while (q_ptr < Q->coefficients + Q->num_terms) {
     q_coeff = *q_ptr++;
     SET_COEFF(q_coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
                                            C.prime, C.mu));
     *ans_ptr++ = q_coeff;
   }
-  while (p_ptr - P->coefficients < P->num_terms) {
+  while (p_ptr < P->coefficients + P->num_terms) {
     *ans_ptr++ = *p_ptr++;
   }
   answer->num_terms = ans_ptr - answer->coefficients;

@@ -24,8 +24,6 @@
 
 #include "snaffour.h"
 
-#include <immintrin.h>
-
 /* Python's memory allocation */
 #include "Python.h"
 #include "pymem.h"

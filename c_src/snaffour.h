@@ -29,6 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <immintrin.h>
 
 /** A Term16_t is an array of 16 chars representing exponents.
  *
@@ -236,6 +237,11 @@ typedef struct MConstants_s {
  */
 
 #define M_REDUCE(X, p, mu) ((X + (((X & MOD_R)*mu) & MOD_R)*p) >> 31)
+
+/** Typedefs for Montgomery arithmetic on a vector of 2 64 bit integers.
+ */
+
+typedef int64_t v2_s64  __attribute__ ((vector_size (16)));
 
 #define F_FOUR_H
 #endif
