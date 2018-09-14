@@ -221,11 +221,15 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
 /** The basic row operation
  *
  * Assume that Q is non-zero, and that the head term of Q has nonzero
- * coefficient in P.  Kill that term of P by subtracting a scalar
- * multiple of Q.  If the head coefficient of Q is a and the
- * corresponding coefficient of P is b, then the computed answer is
- * P - (b/a)*Q.
+ * coefficient in P.  Kill that term of P by subtracting a scalar multiple of
+ * Q.  If the head coefficient of Q is a and the corresponding coefficient of
+ * P is b, then the computed answer is P - (b/a)*Q.
  *
+ * This is the most performance critical step in this implementation.  In the
+ * Cyclic-8 example, reducing the largest matrix (3360 x 9326) in step 20
+ * (degree 13) executes the core loop of this function about 1,366,991,032
+ * times in 7.4 seconds at 3.0GHz. That is an average of about 16.25 cycles
+ * per iteration of the loop.
  */
 
 static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
@@ -234,10 +238,12 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
                                C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
   int factor = C.prime - montgomery_multiply(inv, P_coeff, C.prime, C.mu);
-  int size = P->num_terms + Q->num_terms, cmp, combined;
+  int size = P->num_terms + Q->num_terms;
+  register int cmp;
   register row_coeff_t p_coeff, q_coeff;
   register row_coeff_t *p_ptr = P->coefficients, *q_ptr = Q->coefficients;
   register row_coeff_t *ans_ptr;
+  register int64_t factor64 = factor, prime64 = C.prime, mu64 = C.mu, temp64;
   if (! Row_alloc(answer, size)) {
     return false;
   }
@@ -252,16 +258,24 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
       *ans_ptr++ = p_coeff;
       p_coeff = *++p_ptr;
     } else if (cmp < 0) { /* deg p_coeff < deg q_coeff */
-      SET_COEFF(q_coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
-                                           C.prime, C.mu));
+      temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
+      if (temp64 >= prime64) {
+        temp64 -= prime64;
+      }
+      SET_COEFF(q_coeff, temp64);
       *ans_ptr++ = q_coeff;
       q_coeff = *++q_ptr;
     } else { /* deg p_coeff == deg q_coeff */
-      combined = montgomery_x_plus_ay(GET_COEFF(p_coeff), factor,
-                                      GET_COEFF(q_coeff),
-                                      C.prime, C.mu);
-      if (combined != 0) {
-        SET_COEFF(p_coeff, combined);
+      temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
+      if (temp64 >= prime64) {
+        temp64 -= prime64;
+      }
+      temp64 += GET_COEFF(p_coeff);
+      if (temp64 >= prime64) {
+        temp64 -= prime64;
+      }
+      if (temp64 != 0) {
+        SET_COEFF(p_coeff, temp64);
         *ans_ptr++ = p_coeff;
       }
       p_coeff = *++p_ptr;
@@ -269,14 +283,17 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
     }
   }
   /* At most one of these two loops will be non-trivial. */
-  while (q_ptr < Q->coefficients + Q->num_terms) {
-    q_coeff = *q_ptr++;
-    SET_COEFF(q_coeff, montgomery_multiply(factor, GET_COEFF(q_coeff),
-                                           C.prime, C.mu));
-    *ans_ptr++ = q_coeff;
-  }
   while (p_ptr < P->coefficients + P->num_terms) {
     *ans_ptr++ = *p_ptr++;
+  }
+  while (q_ptr < Q->coefficients + Q->num_terms) {
+    q_coeff = *q_ptr++;
+    temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
+    if (temp64 >= prime64) {
+      temp64 -= prime64;
+    }
+    SET_COEFF(q_coeff, temp64);
+    *ans_ptr++ = q_coeff;
   }
   answer->num_terms = ans_ptr - answer->coefficients;
   return true;
@@ -511,7 +528,6 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   Row_t buffer = zero_row, tmp;
   int head, max_head = -1;
   MConstants_t C = montgomery_init(prime);
-  
   /* Create the matrix. */
   if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Row_t)))) {
     goto oom;;
