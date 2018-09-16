@@ -243,6 +243,8 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   register row_coeff_t p_coeff, q_coeff;
   register row_coeff_t *p_ptr = P->coefficients, *q_ptr = Q->coefficients;
   register row_coeff_t *ans_ptr;
+  register row_coeff_t *p_done = P->coefficients + P->num_terms;
+  register row_coeff_t *q_done = Q->coefficients + Q->num_terms;
   register int64_t factor64 = factor, prime64 = C.prime, mu64 = C.mu, temp64;
   if (! Row_alloc(answer, size)) {
     return false;
@@ -251,21 +253,13 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   ans_ptr = answer->coefficients;
   p_coeff = *p_ptr;
   q_coeff = *q_ptr;
-  while (p_ptr < P->coefficients + P->num_terms &&
-         q_ptr < Q->coefficients + Q->num_terms) {
+  while (p_ptr < p_done && q_ptr < q_done) {
     cmp = GET_COLUMN(p_coeff) - GET_COLUMN(q_coeff);
     if (cmp > 0) { /* deg p_coeff > deg q_coeff */
       *ans_ptr++ = p_coeff;
       p_coeff = *++p_ptr;
-    } else if (cmp < 0) { /* deg p_coeff < deg q_coeff */
-      temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
-      if (temp64 >= prime64) {
-        temp64 -= prime64;
-      }
-      SET_COEFF(q_coeff, temp64);
-      *ans_ptr++ = q_coeff;
-      q_coeff = *++q_ptr;
-    } else { /* deg p_coeff == deg q_coeff */
+    }
+    if (cmp == 0) { /* deg p_coeff == deg q_coeff */
       temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
       if (temp64 >= prime64) {
         temp64 -= prime64;
@@ -281,12 +275,21 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
       p_coeff = *++p_ptr;
       q_coeff = *++q_ptr;
     }
+    if (cmp < 0) { /* deg p_coeff < deg q_coeff */
+      temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
+      if (temp64 >= prime64) {
+        temp64 -= prime64;
+      }
+      SET_COEFF(q_coeff, temp64);
+      *ans_ptr++ = q_coeff;
+      q_coeff = *++q_ptr;
+    }
   }
   /* At most one of these two loops will be non-trivial. */
-  while (p_ptr < P->coefficients + P->num_terms) {
+  while (p_ptr < p_done) {
     *ans_ptr++ = *p_ptr++;
   }
-  while (q_ptr < Q->coefficients + Q->num_terms) {
+  while (q_ptr < q_done) {
     q_coeff = *q_ptr++;
     temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
     if (temp64 >= prime64) {
@@ -528,6 +531,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   Row_t buffer = zero_row, tmp;
   int head, max_head = -1;
   MConstants_t C = montgomery_init(prime);
+
   /* Create the matrix. */
   if (NULL == (matrix = (Row_t*)malloc(num_rows*sizeof(Row_t)))) {
     goto oom;;
