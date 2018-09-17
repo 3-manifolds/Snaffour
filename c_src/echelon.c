@@ -227,9 +227,13 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
  *
  * This is the most performance critical step in this implementation.  In the
  * Cyclic-8 example, reducing the largest matrix (3360 x 9326) in step 20
- * (degree 13) executes the core loop of this function about 1,366,991,032
- * times in 7.4 seconds at 3.0GHz. That is an average of about 16.25 cycles
- * per iteration of the loop.
+ * (degree 13) executes the core loop of this function about 1367373602
+ * times in 7.33 seconds at 3.0GHz. That is an average of about 16.1 cycles
+ * per iteration of the loop.  There are many possible way to arrange the
+ * loop with the aim of coaxing the gcc optimizer into writing fast code.
+ * The results are very unstable: minor rearrangements which are obviously
+ * logically equivalent can easily lead to a 50% slowdown.  The version
+ * below is the fastest that we have stumbled upon.
  */
 
 static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
@@ -238,7 +242,7 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
                                C.prime, C.mu, C.R_cubed);
   /* Multiply by b and negate. Note that p - M(X) = M(p - X) = M(-X). */
   int factor = C.prime - montgomery_multiply(inv, P_coeff, C.prime, C.mu);
-  int size = P->num_terms + Q->num_terms;
+  int size = P->num_terms + Q->num_terms + 1; /* see the comment below */
   register int cmp;
   register row_coeff_t p_coeff, q_coeff;
   register row_coeff_t *p_ptr = P->coefficients, *q_ptr = Q->coefficients;
@@ -251,6 +255,10 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   }
   answer->term_table = P->term_table;
   ans_ptr = answer->coefficients;
+  /* It seems fastest to prefetch the coefficients, but this requires loading
+   * a coefficient with index num_terms.  This is why we added 1 when computing
+   * how much memory to allocate above.
+   */
   p_coeff = *p_ptr;
   q_coeff = *q_ptr;
   while (p_ptr < p_done && q_ptr < q_done) {
@@ -287,9 +295,11 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   }
   /* At most one of these two loops will be non-trivial. */
   while (p_ptr < p_done) {
+    /* We have already fetched the next p_coeff. */
     *ans_ptr++ = *p_ptr++;
   }
   while (q_ptr < q_done) {
+    /* We have already fetched the next q_coeff. */
     q_coeff = *q_ptr++;
     temp64 = M_REDUCE(factor64*GET_COEFF(q_coeff), prime64, mu64);
     if (temp64 >= prime64) {
