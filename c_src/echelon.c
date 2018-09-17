@@ -256,8 +256,8 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   answer->term_table = P->term_table;
   ans_ptr = answer->coefficients;
   /* It seems fastest to prefetch the coefficients, but this requires loading
-   * a coefficient with index num_terms.  This is why we added 1 when computing
-   * how much memory to allocate above.
+   * a coefficient with index equal to num_terms, i.e. one past the end.  This
+   * is why we added 1 when computing how much memory to allocate above.
    */
   p_coeff = *p_ptr;
   q_coeff = *q_ptr;
