@@ -23,7 +23,7 @@
  */
 
 /** Echelon forms
- * 
+ *
  * This file contains functions used by the echelon form computation.
  */
 
@@ -35,7 +35,7 @@
 #define GET_COEFF(x) (x.value)
 #define SET_COLUMN(x, new_column) do {x.column_index = new_column;} while (0)
 #define GET_COLUMN(x) (x.column_index)
-#define ZERO_COEFF ({ .value : 0, .column_index : 0 }) 
+#define ZERO_COEFF ({ .value : 0, .column_index : 0 })
 */
 
 /* Getter and setter macros for typedef int64_t row_coeff_t */
@@ -201,7 +201,7 @@ static inline bool Row_to_Poly(Row_t* src, Polynomial_t* dest, int rank,
                                MConstants_t C) {
   register row_coeff_t coeff;
   int i;
-  
+
   *dest = zero_poly;
   if (!Poly_alloc(dest, src->num_terms, rank)) {
     return false;
@@ -244,17 +244,24 @@ static inline bool row_op(Row_t *Q, Row_t *P, Row_t *answer, int P_coeff,
   int factor = C.prime - montgomery_multiply(inv, P_coeff, C.prime, C.mu);
   int size = P->num_terms + Q->num_terms + 1; /* see the comment below */
   register int cmp;
-  register row_coeff_t p_coeff, q_coeff;
-  register row_coeff_t *p_ptr = P->coefficients, *q_ptr = Q->coefficients;
-  register row_coeff_t *ans_ptr;
-  register row_coeff_t *p_done = P->coefficients + P->num_terms;
-  register row_coeff_t *q_done = Q->coefficients + Q->num_terms;
-  register int64_t factor64 = factor, prime64 = C.prime, mu64 = C.mu, temp64;
+  register row_coeff_t p_coeff;
+  register row_coeff_t q_coeff;
+  register row_coeff_t* p_ptr = P->coefficients;
+  register row_coeff_t* q_ptr = Q->coefficients;
+  register row_coeff_t* ans_ptr;
+  register row_coeff_t* p_done = P->coefficients + P->num_terms;
+  register row_coeff_t* q_done = Q->coefficients + Q->num_terms;
+  register int64_t factor64 = factor;
+  register int64_t prime64 = C.prime;
+  register int64_t mu64 = C.mu;
+  register int64_t temp64;
+
   if (! Row_alloc(answer, size)) {
     return false;
   }
   answer->term_table = P->term_table;
   ans_ptr = answer->coefficients;
+
   /* It seems fastest to prefetch the coefficients, but this requires loading
    * a coefficient with index equal to num_terms, i.e. one past the end.  This
    * is why we added 1 when computing how much memory to allocate above.
@@ -323,7 +330,7 @@ static inline int compare_heads(const void* p1, const void* p2) {
   Row_t *P1 = (Row_t*)p1, *P2 = (Row_t*)p2;
   return GET_COLUMN(P1->coefficients[0]) - GET_COLUMN(P2->coefficients[0]);
 }
-    
+
 static inline int compare_heads_dec(const void* p1, const void* p2) {
   Row_t *P1 = (Row_t*)p1, *P2 = (Row_t*)p2;
   return GET_COLUMN(P2->coefficients[0]) - GET_COLUMN(P1->coefficients[0]);
@@ -549,10 +556,10 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
   if (!Poly_matrix_init(P, num_rows, num_columns, &table, matrix, rank, C)) {
     goto oom;
   }
-  
+
   /* Initialize the buffer row. */
   buffer.term_table = table;
-  
+
   /* Reduce the matrix to echelon form. */
   for (i = 0; i < num_rows; i++) {
     row_i = matrix + i;
@@ -595,7 +602,7 @@ bool Poly_echelon(Polynomial_t** P, Polynomial_t* answer, int num_rows,
     }
   }
   Row_free(&buffer);
-  
+
   /*
    * While we are here in C land, let's sort the result by decreasing head term.
    */
