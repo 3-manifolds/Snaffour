@@ -157,9 +157,8 @@ static inline int montgomery_x_plus_ay(int x, int a, int y, int prime, int mu) {
 
 static void Row_make_monic(Row_t *P, MConstants_t C) {
   register row_coeff_t coeff = P->coefficients[0];
-  int N = 0;
   int factor = montgomery_inverse(GET_COEFF(coeff), C.prime, C.mu, C.R_cubed);
-  for (N = 0; N < P->num_terms; N++) {
+  for (int N = 0; N < P->num_terms; N++) {
     coeff = P->coefficients[N];
     SET_COEFF(coeff, montgomery_multiply(factor, GET_COEFF(coeff), C.prime, C.mu));
     P->coefficients[N] = coeff;
